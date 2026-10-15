@@ -879,6 +879,48 @@ def gaming_chair(name, cx, cy, coll="Study_Zone"):
     back_obj(name + "_Head_Pillow", head, -0.045, 0.0, gc_accent, 0.02)
     lumbar = [(-0.17, H * 0.18), (0.17, H * 0.18), (0.17, H * 0.32), (-0.17, H * 0.32)]
     back_obj(name + "_Lumbar_Pillow", lumbar, -0.05, 0.0, gc_white, 0.025)
+    # 뒷면: 앞면과 같은 세이지 줄무늬 + 위쪽 띠 + 가운데 청사과 그림
+    for sd in (-1, 1):
+        stripe = [(sd * 0.13, 0.02), (sd * 0.2, 0.02), (sd * 0.2, H * 0.6), (sd * 0.15, H * 0.68), (sd * 0.13, H * 0.66)]
+        if sd < 0:
+            stripe = stripe[::-1]
+        back_obj(name + "_Rear_Stripe_%s" % ("L" if sd > 0 else "R"), stripe, TH, TH + 0.006, gc_accent, 0.002)
+    # 머리 부분: 머리 모양을 따라 둥근 연두색 무늬 (머리보다 작게)
+    def head_loop(a, b, zc, n=48, ex=2.6):
+        pts = []
+        for k in range(n):
+            t = 2 * math.pi * k / n
+            c, sn = math.cos(t), math.sin(t)
+            x = a * math.copysign(abs(c) ** (2 / ex), c)
+            z = b * math.copysign(abs(sn) ** (2 / ex), sn)
+            x *= 1 - 0.12 * max(z / b, 0)   # 위쪽은 머리처럼 살짝 좁게
+            pts.append((x, zc + z))
+        return pts
+    back_obj(name + "_Rear_Head_Patch", head_loop(0.14, 0.072, H * 0.875), TH, TH + 0.006, gc_accent, 0.002)   # 안까지 연두색으로 채움
+    if "Gaming_Chair_Apple_Decal" in bpy.data.materials:
+        am = bpy.data.materials["Gaming_Chair_Apple_Decal"]
+    else:
+        am = bpy.data.materials.new("Gaming_Chair_Apple_Decal"); am.use_nodes = True
+        nt = am.node_tree; bs = nt.nodes.get("Principled BSDF")
+        bs.inputs["Roughness"].default_value = 0.45
+        tx = nt.nodes.new("ShaderNodeTexImage")
+        img = bpy.data.images.load(os.path.join(ART_DIR, "apple_emblem.png")); img.pack(); tx.image = img
+        nt.links.new(tx.outputs["Color"], bs.inputs["Base Color"]); nt.links.new(tx.outputs["Alpha"], bs.inputs["Alpha"])
+        for attr, val in (("surface_render_method", "DITHERED"), ("blend_method", "HASHED")):
+            try:
+                setattr(am, attr, val)
+            except Exception:
+                pass
+    AS, AZ, AY = 0.21, H * 0.29, TH + 0.008
+    me = bpy.data.meshes.new(name + "_Rear_Apple")
+    me.from_pydata([(-AS / 2, AY, AZ), (-AS / 2, AY, AZ + AS), (AS / 2, AY, AZ + AS), (AS / 2, AY, AZ)], [], [(0, 3, 2, 1)])
+    uvl = me.uv_layers.new()
+    uv_of = {0: (1, 0), 1: (1, 1), 2: (0, 1), 3: (0, 0)}   # 뒤에서 봤을 때 그림이 똑바로 보이게
+    for lp in me.loops:
+        uvl.data[lp.index].uv = uv_of[lp.vertex_index]
+    me.materials.append(am)
+    ap = bpy.data.objects.new(name + "_Rear_Apple", me); col(coll).objects.link(ap)
+    ap.location = (cx, cy + 0.2, SEAT_Z + 0.01); ap.rotation_euler = (math.radians(-12), 0, 0)
     # 팔걸이 (검정 기둥 + 패드)
     for sd in (-1, 1):
         x = cx + sd * 0.3
