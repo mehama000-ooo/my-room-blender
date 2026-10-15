@@ -1,5 +1,5 @@
 import bpy, bmesh, os, math, random, json
-from mathutils import Matrix, Vector
+from mathutils import Matrix, Vector, Euler
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
 random.seed(7)
@@ -364,9 +364,64 @@ def puffy(name, x0, x1, y0, y1, z0, z1, m, bevel, wrinkle, scale=0.18, billow=0.
         d2.texture_coords = 'GLOBAL'
     return o
 
+def puffy_duvet(name, x0, x1, y0, y1, z0, z1, m, lift=None, dome=0.09, quilt=0.034, period=0.32, R=0.11, cuts=60):
+    """폭신한 누빔 이불: 가장자리가 둥글게 말리고, 가운데가 볼록하고, 솜이 칸칸이 볼록한 누빔"""
+    W_, D_, H_ = x1 - x0, y1 - y0, z1 - z0
+    bm = bmesh.new()
+    bmesh.ops.create_cube(bm, size=1.0, matrix=Matrix.Diagonal((W_, D_, H_, 1)))
+    bmesh.ops.subdivide_edges(bm, edges=bm.edges[:], cuts=cuts, use_grid_fill=True)
+    cx = (x0 + x1) / 2
+    for v in bm.verts:
+        x, y, z = v.co.x, v.co.y, v.co.z
+        hx, hy = W_ / 2 - abs(x), D_ / 2 - abs(y)
+        e, dzt = min(hx, hy), H_ / 2 - z
+        if e < R and dzt < R:   # 위 모서리를 반지름 R로 둥글게 말기
+            a, b = R - e, R - dzt
+            L = math.hypot(a, b)
+            if L > 1e-9:
+                e2, dzt2 = R - a * R / L, R - b * R / L
+                if hx <= hy:
+                    x = math.copysign(W_ / 2 - e2, x)
+                else:
+                    y = math.copysign(D_ / 2 - e2, y)
+                z = H_ / 2 - dzt2
+        nx, ny = 2 * x / W_, 2 * y / D_
+        wz = min(max((z + H_ / 2) / H_, 0.0), 1.0) ** 3
+        edge = max(1 - abs(nx) ** 4, 0) * max(1 - abs(ny) ** 4, 0)
+        qx = 0.5 - 0.5 * math.cos(2 * math.pi * (x + W_ / 2) / period)
+        qy = 0.5 - 0.5 * math.cos(2 * math.pi * (y + D_ / 2) / period)
+        z += wz * edge * (dome + quilt * (qx * qy) ** 0.35)
+        if lift:   # (시작 x, 경사 길이, 높이): 이불 머리쪽을 베개 위로 덮이게 들어올림
+            lx, lr, lh = lift
+            t = min(max((cx + x - lx) / lr, 0.0), 1.0)
+            t = t * t * (3 - 2 * t)
+            z += lh * t * (1.0 if z > 0 else 0.6)
+        v.co.x, v.co.y, v.co.z = x, y, z
+    o = finish(name, bm, m, "Bed", ((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2), smooth=True)
+    sub = o.modifiers.new("Soft", 'SUBSURF'); sub.levels = 1; sub.render_levels = 2
+    tex = bpy.data.textures.new(name + "_Wrinkles", 'CLOUDS'); tex.noise_scale = 0.3; tex.noise_depth = 2
+    dp = o.modifiers.new("Wrinkles", 'DISPLACE'); dp.texture = tex; dp.strength = 0.006; dp.mid_level = 0.5; dp.texture_coords = 'GLOBAL'
+    t2 = bpy.data.textures.new(name + "_Billow", 'CLOUDS'); t2.noise_scale = 0.45; t2.noise_depth = 1
+    d2 = o.modifiers.new("Billow", 'DISPLACE'); d2.texture = t2; d2.strength = 0.04; d2.mid_level = 0.35; d2.texture_coords = 'GLOBAL'
+    return o
+
+def soften_fabric(m, sheen=0.75, bump=0.22):
+    """천 느낌: 부드러운 반짝임(시인) + 아주 고운 천 결"""
+    nt = m.node_tree; b = nt.nodes.get("Principled BSDF")
+    for key in ("Sheen Weight", "Sheen"):
+        if key in b.inputs:
+            b.inputs[key].default_value = sheen; break
+    if "Sheen Roughness" in b.inputs:
+        b.inputs["Sheen Roughness"].default_value = 0.6
+    if not b.inputs["Normal"].is_linked:
+        nz = nt.nodes.new("ShaderNodeTexNoise"); nz.inputs["Scale"].default_value = 700.0
+        bp = nt.nodes.new("ShaderNodeBump"); bp.inputs["Strength"].default_value = bump; bp.inputs["Distance"].default_value = 0.002
+        nt.links.new(nz.outputs["Fac"], bp.inputs["Height"]); nt.links.new(bp.outputs["Normal"], b.inputs["Normal"])
+
 box("Bed_Mattress", BX0 + 0.03, BX1 - 0.08, BY0 + 0.03, BY1 - 0.03, 0.3, 0.52, sheet_sage, "Bed")
 # 사계절 이불: 두툼하게 부풀고 구겨진 체크 이불 (침대 옆으로 살짝 흘러내림)
-puffy("Bed_Duvet_Plaid", BX0 - 0.05, BX1 - 0.47, BY0 - 0.07, BY1 + 0.03, 0.36, 0.6, plaid, 0.08, 0.012, 0.3, billow=0.08, cuts=20, lift=(BX1 - 0.76, 0.14, 0.06))
+soften_fabric(plaid)
+puffy_duvet("Bed_Duvet_Plaid", BX0 - 0.05, BX1 - 0.47, BY0 - 0.07, BY1 + 0.03, 0.36, 0.6, plaid, lift=(BX1 - 0.76, 0.14, 0.06))
 # 베개 2개 (눕혀서): 하나는 체크, 하나는 세이지 그린
 for i, (yy, mm) in enumerate(((BY0 + 0.37, plaid_pillow), (BY1 - 0.37, pillow_sage))):
     pw = puffy("Bed_Pillow_%d" % i, BX1 - 0.64, BX1 - 0.22, yy - 0.32, yy + 0.32, 0.52, 0.64, mm, 0.055, 0.012, 0.1, billow=0.015, cuts=8)
@@ -792,22 +847,640 @@ shelf_z = [0.0, 0.46, 0.92, 1.38, SH - 0.025]
 parts = [(SX0, SX1, SY0, SY0 + 0.025, 0, SH), (SX0, SX1, SY1 - 0.025, SY1, 0, SH)]
 parts += [(SX0, SX1, SY0, SY1, z, z + 0.025) for z in shelf_z]
 boxes("Bookshelf", parts, M["oak"], "Bookshelf")
-book_specs = {i: [] for i in range(len(BOOK_COLS))}
-for s in range(4):
-    y = SY0 + 0.04
-    zb = shelf_z[s] + 0.025
-    while y < SY1 - 0.08:
-        if random.random() < 0.15:
-            y += 0.07; continue
-        t = random.uniform(0.02, 0.045); hgt = random.uniform(0.2, 0.36); dep = random.uniform(0.18, 0.24)
-        xc = (SX0 + SX1) / 2
-        book_specs[random.randrange(len(BOOK_COLS))].append((xc - dep / 2, xc + dep / 2, y, y + t, zb, zb + hgt))
-        y += t + 0.003
-for i, sp in book_specs.items():
-    if sp:
-        boxes("Books_%d" % i, sp, BOOK_COLS[i], "Bookshelf")
-cyl("Shelf_Vase", 0.05, SH, SH + 0.18, (SX0 + SX1) / 2, 0.3, M["pot"], "Bookshelf", 16, r2=0.03)
-sphere("Shelf_Plant", 0.09, ((SX0 + SX1) / 2, 0.7, SH + 0.1), M["plant"], "Bookshelf")
+# (꽃병, 식물은 비워 둠)
+def manga_books(x_spine, y_start, z0, series, stack=None, coll="Bookshelf", mirror_x=None):
+    """만화책 세트: 같은 시리즈는 같은 색 책등 + 위쪽 색 띠 + 아래 흰 라벨 + 권 번호
+    (+x 쪽 책등 기준으로 만들고, mirror_x를 주면 그 x를 기준으로 뒤집어서 책등이 -x 쪽을 보게 함)"""
+    def MX(lst):
+        if mirror_x is None:
+            return lst
+        return [(2 * mirror_x - b, 2 * mirror_x - a, c, d_, e, f) for a, b, c, d_, e, f in lst]
+    BW, BH = 0.112, 0.176   # 일반 만화책 크기 (11.2 x 17.6cm)
+    page_m = mat("Manga_Pages", (0.93, 0.9, 0.82, 1), 0.85)
+    label_m = mat("Manga_Spine_Label", (0.97, 0.96, 0.93, 1), 0.6)
+    num_m = mat("Manga_Spine_Number", (0.08, 0.08, 0.09, 1), 0.5)
+    pages = []
+    x0 = x_spine - BW
+    def number(oname, k, loc, rot):
+        cu = bpy.data.curves.new(oname, 'FONT'); cu.body = str(k); cu.size = 0.008
+        cu.align_x = 'CENTER'; cu.align_y = 'CENTER'; cu.extrude = 0.0002
+        cu.materials.append(num_m)
+        if mirror_x is not None:
+            loc = (2 * mirror_x - loc[0], loc[1], loc[2]); rot = (rot[0], rot[1], -rot[2])
+        to = bpy.data.objects.new(oname, cu); to.location = loc; to.rotation_euler = rot
+        col(coll).objects.link(to)
+    y = y_start
+    for sname, cover_rgba, band_rgba, count, t in series:
+        cm = mat("Manga_%s_Cover" % sname, cover_rgba, 0.45)
+        bmm = mat("Manga_%s_Band" % sname, band_rgba, 0.5)
+        covers, bands, labels = [], [], []
+        for k in range(count):
+            y0, y1 = y, y + t
+            pages.append((x0, x_spine - 0.002, y0 + 0.0008, y1 - 0.0008, z0, z0 + BH - 0.002))
+            covers += [(x_spine - 0.002, x_spine, y0, y1, z0, z0 + BH), (x0, x_spine, y0, y0 + 0.0008, z0, z0 + BH), (x0, x_spine, y1 - 0.0008, y1, z0, z0 + BH)]
+            bands.append((x_spine, x_spine + 0.0006, y0 + 0.0015, y1 - 0.0015, z0 + BH - 0.045, z0 + BH - 0.012))
+            labels.append((x_spine, x_spine + 0.0006, y0 + 0.002, y1 - 0.002, z0 + 0.012, z0 + 0.034))
+            number("Manga_%s_No_%d" % (sname, k + 1), k + 1, (x_spine + 0.0009, (y0 + y1) / 2, z0 + 0.023), (math.radians(90), 0, math.radians(90)))
+            y = y1 + 0.0008
+        boxes("Manga_%s_Covers" % sname, MX(covers), cm, coll)
+        boxes("Manga_%s_Bands" % sname, MX(bands), bmm, coll)
+        boxes("Manga_%s_Labels" % sname, MX(labels), label_m, coll)
+        y += 0.012
+    if stack:   # 끝에 눕혀서 쌓아 둔 몇 권
+        sname, cover_rgba, band_rgba, count, t = stack
+        cm = mat("Manga_%s_Cover" % sname, cover_rgba, 0.45)
+        bmm = mat("Manga_%s_Band" % sname, band_rgba, 0.5)
+        y0, y1 = y + 0.01, y + 0.01 + BH
+        covers, bands, labels = [], [], []
+        for k in range(count):
+            za, zb = z0 + k * (t + 0.0005), z0 + k * (t + 0.0005) + t
+            pages.append((x0, x_spine - 0.002, y0, y1 - 0.002, za + 0.0008, zb - 0.0008))
+            covers += [(x_spine - 0.002, x_spine, y0, y1, za, zb), (x0, x_spine, y0, y1, za, za + 0.0008), (x0, x_spine, y0, y1, zb - 0.0008, zb)]
+            bands.append((x_spine, x_spine + 0.0006, y1 - 0.045, y1 - 0.012, za + 0.0015, zb - 0.0015))
+            labels.append((x_spine, x_spine + 0.0006, y0 + 0.012, y0 + 0.034, za + 0.002, zb - 0.002))
+            number("Manga_%s_No_%d" % (sname, k + 1), k + 1, (x_spine + 0.0009, y0 + 0.023, (za + zb) / 2), (math.radians(90), 0, math.radians(90)))
+        boxes("Manga_%s_Covers" % sname, MX(covers), cm, coll)
+        boxes("Manga_%s_Bands" % sname, MX(bands), bmm, coll)
+        boxes("Manga_%s_Labels" % sname, MX(labels), label_m, coll)
+    boxes("Manga_Pages", MX(pages), page_m, coll)
+
+MANGA_SERIES = [("Sky", (0.94, 0.95, 0.97, 1), (0.36, 0.6, 0.85, 1), 14, 0.015),
+                ("Coral", (0.97, 0.94, 0.89, 1), (0.88, 0.46, 0.38, 1), 12, 0.0155),
+                ("Night", (0.15, 0.18, 0.3, 1), (0.95, 0.8, 0.32, 1), 10, 0.016)]
+manga_books(SX1 - 0.012, SY0 + 0.04, shelf_z[1] + 0.025, MANGA_SERIES, stack=("Mint", (0.9, 0.96, 0.93, 1), (0.4, 0.72, 0.6, 1), 4, 0.015),
+            mirror_x=(SX0 + SX1) / 2)   # 두 번째 칸: 만화책 (책상 다리에 가려지지 않게 책등이 입구 쪽을 봄)
+
+def chibi_figure(name, fx, fy, fz, face_rot=0.0, scale=1.0, coll="Bookshelf"):
+    """오리지널 미니 피규어 (남자아이): 짧은 머리 + 세이지 그린 후드티 + 청바지 + 두 손에 청사과 + 동그란 받침 (기본: +x 쪽을 바라봄)"""
+    def fm(nm, rgba, rough=0.45):
+        if nm in bpy.data.materials:
+            return bpy.data.materials[nm]
+        m = bpy.data.materials.new(nm); m.use_nodes = True
+        b = m.node_tree.nodes.get("Principled BSDF")
+        b.inputs["Base Color"].default_value = rgba; b.inputs["Roughness"].default_value = rough
+        m.diffuse_color = rgba
+        return m
+    skin = fm("Figure_Skin", (0.98, 0.86, 0.78, 1), 0.4)
+    hair = fm("Figure_Hair_Brown", (0.36, 0.23, 0.16, 1), 0.35)
+    hood = fm("Figure_Hoodie_Sage", (0.55, 0.67, 0.48, 1), 0.55)
+    cream = fm("Figure_Cream", (0.96, 0.93, 0.86, 1), 0.5)
+    shoe = fm("Figure_Shoes", (0.4, 0.27, 0.19, 1), 0.35)
+    denim = fm("Figure_Jeans", (0.27, 0.34, 0.47, 1), 0.6)
+    sneaker = fm("Figure_Sneakers_White", (0.95, 0.95, 0.93, 1), 0.4)
+    eye = fm("Figure_Eye", (0.16, 0.1, 0.08, 1), 0.15)
+    shine = fm("Figure_Eye_Shine", (1, 1, 1, 1), 0.1)
+    blush = fm("Figure_Blush", (0.96, 0.62, 0.6, 1), 0.6)
+    apple = fm("Figure_Apple", (0.55, 0.76, 0.3, 1), 0.3)
+    base_m = fm("Figure_Base_White", (0.95, 0.95, 0.94, 1), 0.15)
+    cl = bpy.data.collections.get(coll) or bpy.context.scene.collection
+    root = bpy.data.objects.new(name, None); cl.objects.link(root)
+    root.location = (fx, fy, fz); root.rotation_euler = (0, 0, face_rot); root.scale = (scale, scale, scale)
+
+    def ell(bm, c, r, rot=(0, 0, 0), seg=(24, 14)):
+        mtx = Matrix.Translation(c) @ Euler(rot).to_matrix().to_4x4() @ Matrix.Diagonal((r[0], r[1], r[2], 1))
+        bmesh.ops.create_uvsphere(bm, u_segments=seg[0], v_segments=seg[1], radius=1.0, matrix=mtx)
+
+    def make(oname, bm, m):
+        me = bpy.data.meshes.new(oname); bm.to_mesh(me); bm.free()
+        for p in me.polygons:
+            p.use_smooth = True
+        me.materials.append(m)
+        o = bpy.data.objects.new(oname, me); cl.objects.link(o); o.parent = root
+        return o
+
+    HZ, HR = 0.1, 0.034   # 머리 중심 높이, 머리 반지름
+    def on_head(y, z, inset):
+        x = math.sqrt(max(HR * HR - y * y - (z - HZ) ** 2, 0)) - inset
+        return (x, y, z), math.atan2(y, x)
+
+    # 받침
+    bm = bmesh.new()
+    bmesh.ops.create_cone(bm, cap_ends=True, segments=40, radius1=0.04, radius2=0.04, depth=0.006, matrix=Matrix.Translation((0, 0, 0.003)))
+    make(name + "_Base", bm, base_m)
+    bm = bmesh.new()
+    bmesh.ops.create_cone(bm, cap_ends=True, segments=40, radius1=0.0405, radius2=0.0405, depth=0.0015, matrix=Matrix.Translation((0, 0, 0.0035)))
+    make(name + "_Base_Rim", bm, hood)
+    # 청바지 + 흰 운동화
+    bm = bmesh.new()
+    for sd in (-1, 1):
+        ell(bm, (0.0, sd * 0.0095, 0.027), (0.0085, 0.0085, 0.018))
+    ell(bm, (0, 0, 0.042), (0.016, 0.019, 0.008))
+    make(name + "_Jeans", bm, denim)
+    bm = bmesh.new()
+    for sd in (-1, 1):
+        ell(bm, (0.004, sd * 0.0095, 0.0095), (0.012, 0.0085, 0.0058))
+    make(name + "_Sneakers", bm, sneaker)
+    # 후드티 + 소매
+    bm = bmesh.new()
+    bmesh.ops.create_cone(bm, cap_ends=True, segments=32, radius1=0.02, radius2=0.016, depth=0.027, matrix=Matrix.Translation((0, 0, 0.0555)))
+    ell(bm, (0, 0, 0.067), (0.016, 0.019, 0.007))
+    ell(bm, (-0.017, 0, 0.073), (0.012, 0.021, 0.011))   # 등 뒤 후드
+    for sd in (-1, 1):
+        ell(bm, (0.01, sd * 0.019, 0.057), (0.016, 0.0065, 0.0065), (0, math.radians(25), sd * math.radians(-25)))
+    make(name + "_Hoodie", bm, hood)
+    bm = bmesh.new()
+    for sd in (-1, 1):
+        ell(bm, (0.012, sd * 0.004, 0.064), (0.0012, 0.0012, 0.006), (0, math.radians(-10), 0), seg=(8, 6))   # 후드 끈
+    ell(bm, (0, 0, 0.0435), (0.0205, 0.0205, 0.0022), seg=(32, 6))   # 후드티 밑단
+    make(name + "_Hoodie_Trim", bm, cream)
+    # 손 + 청사과
+    bm = bmesh.new()
+    for sd in (-1, 1):
+        ell(bm, (0.023, sd * 0.009, 0.05), (0.0045, 0.0045, 0.0045))
+    make(name + "_Hands", bm, skin)
+    bm = bmesh.new(); ell(bm, (0.029, 0, 0.051), (0.0085, 0.0085, 0.008)); make(name + "_Apple", bm, apple)
+    bm = bmesh.new(); ell(bm, (0.029, 0, 0.0605), (0.0008, 0.0008, 0.0025), seg=(8, 6)); make(name + "_Apple_Stem", bm, shoe)
+    # 머리 + 얼굴
+    bm = bmesh.new(); ell(bm, (0, 0, HZ), (HR, HR, HR * 0.96), seg=(32, 18)); make(name + "_Head", bm, skin)
+    bm = bmesh.new()
+    for sd in (-1, 1):
+        c, rz = on_head(sd * 0.0125, 0.0975, 0.0025)
+        ell(bm, c, (0.003, 0.0052, 0.0072), (0, 0, rz), seg=(16, 10))
+    make(name + "_Eyes", bm, eye)
+    bm = bmesh.new()
+    for sd in (-1, 1):
+        c, rz = on_head(sd * 0.0115, 0.1005, 0.0)
+        ell(bm, c, (0.0012, 0.0016, 0.0016), (0, 0, rz), seg=(8, 6))
+    make(name + "_Eye_Shine", bm, shine)
+    bm = bmesh.new()
+    for sd in (-1, 1):
+        c, rz = on_head(sd * 0.02, 0.087, 0.0016)
+        ell(bm, c, (0.0018, 0.0048, 0.0026), (0, 0, rz), seg=(12, 8))
+    make(name + "_Blush", bm, blush)
+    bm = bmesh.new()
+    c, rz = on_head(0.0, 0.0855, 0.0006)
+    ell(bm, c, (0.0008, 0.0026, 0.0011), (0, 0, 0), seg=(10, 6))
+    make(name + "_Mouth", bm, eye)
+    # 짧은 머리: 뒷머리 + 삐죽한 앞머리 3갈래 + 짧은 구레나룻
+    bm = bmesh.new()
+    ell(bm, (-0.005, 0, HZ + 0.006), (0.036, 0.0365, 0.033), seg=(32, 18))
+    for k, yy in enumerate((-0.016, 0.0, 0.016)):
+        ell(bm, (0.022, yy, HZ + 0.02 - 0.002 * (k == 1)), (0.013, 0.012, 0.011), (0, math.radians(-25), (k - 1) * math.radians(12)))
+    for sd in (-1, 1):
+        ell(bm, (0.014, sd * 0.031, HZ + 0.001), (0.008, 0.005, 0.011), (0, math.radians(-10), 0))
+    make(name + "_Hair", bm, hair)
+    return root
+chibi_figure("Shelf_Figure", (SX0 + SX1) / 2, 0.96, shelf_z[1] + 0.025, face_rot=math.pi, scale=1.25)   # 만화책 옆: 오리지널 미니 피규어 (입구 쪽을 바라봄)
+
+def rattan_baskets(name, x0, x1, ys, z0, hgt, coll="Bookshelf"):
+    """라탄 수납 바구니: 촘촘한 엮음 무늬 + 진한 테두리 + 양쪽 손잡이 구멍 (ys: 바구니마다 (y0, y1))"""
+    def weave_mat(nm, c1, c2, scale):
+        if nm in bpy.data.materials:
+            return bpy.data.materials[nm]
+        m = bpy.data.materials.new(nm); m.use_nodes = True
+        nt = m.node_tree; b = nt.nodes.get("Principled BSDF")
+        b.inputs["Roughness"].default_value = 0.75
+        tc = nt.nodes.new("ShaderNodeTexCoord")
+        ck = nt.nodes.new("ShaderNodeTexChecker"); ck.inputs["Scale"].default_value = scale
+        ck.inputs["Color1"].default_value = c1; ck.inputs["Color2"].default_value = c2
+        wv = nt.nodes.new("ShaderNodeTexWave"); wv.inputs["Scale"].default_value = scale * 0.5
+        wv.bands_direction = 'Z'
+        mix = nt.nodes.new("ShaderNodeMath"); mix.operation = 'MULTIPLY'
+        bp = nt.nodes.new("ShaderNodeBump"); bp.inputs["Strength"].default_value = 0.45; bp.inputs["Distance"].default_value = 0.002
+        nt.links.new(tc.outputs["Object"], ck.inputs["Vector"]); nt.links.new(tc.outputs["Object"], wv.inputs["Vector"])
+        nt.links.new(ck.outputs["Color"], b.inputs["Base Color"])
+        nt.links.new(ck.outputs["Fac"], mix.inputs[0]); nt.links.new(wv.outputs["Fac"], mix.inputs[1])
+        nt.links.new(mix.outputs["Value"], bp.inputs["Height"]); nt.links.new(bp.outputs["Normal"], b.inputs["Normal"])
+        m.diffuse_color = c1
+        return m
+    body_m = weave_mat("Rattan_Weave", (0.76, 0.59, 0.38, 1), (0.62, 0.45, 0.28, 1), 140.0)
+    rim_m = weave_mat("Rattan_Rim", (0.6, 0.43, 0.26, 1), (0.52, 0.36, 0.21, 1), 260.0)
+    cl = bpy.data.collections.get(coll) or bpy.context.scene.collection
+    for i, (y0, y1) in enumerate(ys):
+        bn = "%s_%d" % (name, i + 1)
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+        dx, dy = x1 - x0, y1 - y0
+        bm = bmesh.new()
+        bmesh.ops.create_cube(bm, size=1.0, matrix=Matrix.Translation((0, 0, hgt / 2)) @ Matrix.Diagonal((dx * 0.96, dy * 0.96, hgt, 1)))
+        top = [f for f in bm.faces if f.normal.z > 0.9]
+        for v in top[0].verts:   # 위쪽이 살짝 넓은 바구니 모양
+            v.co.x *= 1 / 0.96; v.co.y *= 1 / 0.96
+        bmesh.ops.delete(bm, geom=top, context='FACES_ONLY')
+        me = bpy.data.meshes.new(bn); bm.to_mesh(me); bm.free(); me.materials.append(body_m)
+        o = bpy.data.objects.new(bn, me); cl.objects.link(o); o.location = (cx, cy, z0)
+        so = o.modifiers.new("Wall", 'SOLIDIFY'); so.thickness = 0.008; so.offset = -1
+        # 손잡이 구멍 (앞뒤 양쪽)
+        cut = bpy.data.meshes.new(bn + "_Handle_Cutter")
+        bmc = bmesh.new()
+        bmesh.ops.create_cone(bmc, cap_ends=True, segments=32, radius1=1.0, radius2=1.0, depth=1.0,
+                              matrix=Matrix.Rotation(math.radians(90), 4, 'Y') @ Matrix.Diagonal((0.016, 0.045, dx + 0.1, 1)))
+        bmc.to_mesh(cut); bmc.free()
+        co = bpy.data.objects.new(bn + "_Handle_Cutter", cut); cl.objects.link(co)
+        co.parent = o; co.location = (0, 0, hgt - 0.045)
+        co.display_type = 'WIRE'; co.hide_render = True
+        bo = o.modifiers.new("Handles", 'BOOLEAN'); bo.operation = 'DIFFERENCE'; bo.object = co
+        try:
+            bo.solver = 'EXACT'
+        except Exception:
+            pass
+        bv = o.modifiers.new("Round", 'BEVEL'); bv.width = 0.004; bv.segments = 2; bv.limit_method = 'ANGLE'
+        # 진한 테두리
+        rx, ry, t = dx / 2 + 0.003, dy / 2 + 0.003, 0.012
+        bm = bmesh.new()
+        for a, b_, c, d_ in ((-rx, rx, -ry, -ry + t), (-rx, rx, ry - t, ry), (-rx, -rx + t, -ry, ry), (rx - t, rx, -ry, ry)):
+            bmesh.ops.create_cube(bm, size=1.0, matrix=Matrix.Translation(((a + b_) / 2, (c + d_) / 2, hgt - 0.006)) @ Matrix.Diagonal((b_ - a, d_ - c, 0.016, 1)))
+        rme = bpy.data.meshes.new(bn + "_Rim"); bm.to_mesh(rme); bm.free(); rme.materials.append(rim_m)
+        ro = bpy.data.objects.new(bn + "_Rim", rme); cl.objects.link(ro); ro.parent = o
+        ro.modifiers.new("Round", 'BEVEL').width = 0.004
+rattan_baskets("Shelf_Rattan_Basket", SX0 + 0.015, SX1 - 0.015, [(0.05, 0.37), (0.39, 0.71), (0.73, 1.05)], shelf_z[0] + 0.025, 0.26)   # 맨 아래 칸: 라탄 바구니 3개
+
+def basket_blanket(name, x0, x1, y0, y1, rim_z, coll="Bookshelf"):
+    """라탄 바구니 속 접은 니트 담요: 위로 폭신하게 올라옴"""
+    nm = "Blanket_Knit_Sage"
+    if nm in bpy.data.materials:
+        km = bpy.data.materials[nm]
+    else:
+        km = bpy.data.materials.new(nm); km.use_nodes = True
+        nt = km.node_tree; b = nt.nodes.get("Principled BSDF")
+        b.inputs["Base Color"].default_value = (0.6, 0.69, 0.54, 1); b.inputs["Roughness"].default_value = 0.95
+        for key in ("Sheen Weight", "Sheen"):
+            if key in b.inputs:
+                b.inputs[key].default_value = 0.6; break
+        tc = nt.nodes.new("ShaderNodeTexCoord")
+        wv = nt.nodes.new("ShaderNodeTexWave"); wv.inputs["Scale"].default_value = 160.0; wv.bands_direction = 'Y'
+        bp = nt.nodes.new("ShaderNodeBump"); bp.inputs["Strength"].default_value = 0.5; bp.inputs["Distance"].default_value = 0.003
+        nt.links.new(tc.outputs["Object"], wv.inputs["Vector"]); nt.links.new(wv.outputs["Fac"], bp.inputs["Height"])
+        nt.links.new(bp.outputs["Normal"], b.inputs["Normal"])
+        km.diffuse_color = (0.6, 0.69, 0.54, 1)
+    cl = bpy.data.collections.get(coll) or bpy.context.scene.collection
+    # 접힌 담요 덩어리 (바구니 안 → 테두리 위로 볼록)
+    bm = bmesh.new()
+    bmesh.ops.create_cube(bm, size=1.0)
+    bmesh.ops.subdivide_edges(bm, edges=bm.edges[:], cuts=6, use_grid_fill=True)
+    zc0, zc1 = rim_z - 0.12, rim_z + 0.028
+    for v in bm.verts:
+        u = v.co.z + 0.5
+        bulge = 1.0 + 0.04 * (1 - (2 * v.co.x) ** 2) * u
+        v.co.x *= (x1 - x0) * bulge; v.co.y *= (y1 - y0)
+        v.co.z = zc0 + (zc1 - zc0) * u
+        if u > 0.99:   # 위가 둥글게 부풀어 오름
+            v.co.z += 0.012 * (1 - (2 * v.co.x / (x1 - x0)) ** 2) * (1 - (2 * v.co.y / (y1 - y0)) ** 2)
+    me = bpy.data.meshes.new(name); bm.to_mesh(me); bm.free()
+    for p in me.polygons:
+        p.use_smooth = True
+    me.materials.append(km)
+    o = bpy.data.objects.new(name, me); cl.objects.link(o); o.location = ((x0 + x1) / 2, (y0 + y1) / 2, 0)
+    o.modifiers.new("Soft", 'SUBSURF').levels = 2
+    # 접힌 선 2줄 (살짝 파인 홈 느낌의 얇은 띠)
+    bm = bmesh.new()
+    for k in (1, 2):
+        yy = y0 + (y1 - y0) * k / 3 - (y0 + y1) / 2
+        bmesh.ops.create_cube(bm, size=1.0, matrix=Matrix.Translation((0, yy, zc1 + 0.009)) @ Matrix.Diagonal((x1 - x0 - 0.04, 0.004, 0.004, 1)))
+    fl = bpy.data.meshes.new(name + "_Folds"); bm.to_mesh(fl); bm.free(); fl.materials.append(km)
+    fo = bpy.data.objects.new(name + "_Folds", fl); cl.objects.link(fo); fo.parent = o
+    fo.modifiers.new("Soft", 'SUBSURF').levels = 2
+    return o
+basket_blanket("Shelf_Basket_Blanket", SX0 + 0.025, SX1 - 0.025, 0.745, 1.035, shelf_z[0] + 0.025 + 0.26)   # 입구에서 제일 먼 바구니: 세이지 니트 담요
+
+def basket_yarn(name, balls, needle_ball=None, seed=5, coll="Bookshelf"):
+    """털실 뭉치: 공 모양 위에 실을 여러 방향으로 감은 결 + 한 뭉치에 원목 뜨개바늘 2개 (balls: (x, y, z, 반지름, 색이름))"""
+    rnd = random.Random(seed)
+    cols = {"Cream": (0.94, 0.9, 0.8, 1), "Sage": (0.56, 0.67, 0.49, 1), "Terracotta": (0.76, 0.45, 0.33, 1),
+            "Oat": (0.82, 0.74, 0.6, 1), "Pink": (0.9, 0.7, 0.68, 1)}
+    def ym(cn):
+        nm = "Yarn_" + cn
+        if nm in bpy.data.materials:
+            return bpy.data.materials[nm]
+        m = bpy.data.materials.new(nm); m.use_nodes = True
+        b = m.node_tree.nodes.get("Principled BSDF")
+        b.inputs["Base Color"].default_value = cols[cn]; b.inputs["Roughness"].default_value = 0.95
+        for key in ("Sheen Weight", "Sheen"):
+            if key in b.inputs:
+                b.inputs[key].default_value = 0.7; break
+        m.diffuse_color = cols[cn]
+        return m
+    cl = bpy.data.collections.get(coll) or bpy.context.scene.collection
+    per = {}
+    for (bx, by, bz, r, cn) in balls:
+        bm = per.setdefault(cn, bmesh.new())
+        bmesh.ops.create_uvsphere(bm, u_segments=24, v_segments=14, radius=r * 0.97, matrix=Matrix.Translation((bx, by, bz)))
+        for _ in range(26):   # 실 감은 결: 여러 방향의 둥근 실 가닥
+            nrm = Vector((rnd.gauss(0, 1), rnd.gauss(0, 1), rnd.gauss(0, 1))).normalized()
+            u = nrm.orthogonal().normalized(); v = nrm.cross(u)
+            R, rr, N, Mn = r * (0.99 + rnd.uniform(0, 0.025)), r * 0.06, 56, 6
+            ring = []
+            for a in range(N):
+                th = 2 * math.pi * a / N
+                cdir = u * math.cos(th) + v * math.sin(th)
+                row = []
+                for b_ in range(Mn):
+                    ph = 2 * math.pi * b_ / Mn
+                    p = Vector((bx, by, bz)) + cdir * (R + rr * math.cos(ph)) + nrm * (rr * math.sin(ph))
+                    row.append(bm.verts.new(p))
+                ring.append(row)
+            for a in range(N):
+                for b_ in range(Mn):
+                    bm.faces.new((ring[a][b_], ring[(a + 1) % N][b_], ring[(a + 1) % N][(b_ + 1) % Mn], ring[a][(b_ + 1) % Mn]))
+    for cn, bm in per.items():
+        me = bpy.data.meshes.new("%s_%s" % (name, cn)); bm.to_mesh(me); bm.free()
+        for p in me.polygons:
+            p.use_smooth = True
+        me.materials.append(ym(cn))
+        o = bpy.data.objects.new(me.name, me); cl.objects.link(o)
+    if needle_ball is not None:   # 원목 뜨개바늘 2개 (X자로 꽂힘)
+        bx, by, bz, r, _ = balls[needle_ball]
+        wood = bpy.data.materials.get("Knitting_Needle_Wood")
+        if wood is None:
+            wood = bpy.data.materials.new("Knitting_Needle_Wood"); wood.use_nodes = True
+            b = wood.node_tree.nodes.get("Principled BSDF")
+            b.inputs["Base Color"].default_value = (0.72, 0.53, 0.33, 1); b.inputs["Roughness"].default_value = 0.4
+            wood.diffuse_color = (0.72, 0.53, 0.33, 1)
+        bm = bmesh.new()
+        for sd in (-1, 1):
+            rot = Euler((sd * math.radians(22), math.radians(14), 0)).to_matrix().to_4x4()
+            base = Matrix.Translation((bx, by, bz - r * 0.3)) @ rot
+            bmesh.ops.create_cone(bm, cap_ends=True, segments=12, radius1=0.0028, radius2=0.0028, depth=0.19, matrix=base @ Matrix.Translation((0, 0, 0.095)))
+            bmesh.ops.create_cone(bm, cap_ends=True, segments=12, radius1=0.0012, radius2=0.0028, depth=0.012, matrix=base @ Matrix.Translation((0, 0, -0.006)))
+            bmesh.ops.create_uvsphere(bm, u_segments=12, v_segments=8, radius=0.0055, matrix=base @ Matrix.Translation((0, 0, 0.19)))
+        me = bpy.data.meshes.new(name + "_Needles"); bm.to_mesh(me); bm.free()
+        for p in me.polygons:
+            p.use_smooth = True
+        me.materials.append(wood)
+        o = bpy.data.objects.new(me.name, me); cl.objects.link(o)
+RZ = shelf_z[0] + 0.025 + 0.26   # 바구니 테두리 높이
+basket_yarn("Shelf_Basket_Yarn", [(1.545, 0.47, RZ - 0.1, 0.044, "Oat"), (1.69, 0.48, RZ - 0.1, 0.044, "Cream"), (1.55, 0.63, RZ - 0.1, 0.044, "Pink"), (1.685, 0.62, RZ - 0.1, 0.044, "Sage"),
+                                  (1.54, 0.46, RZ - 0.03, 0.046, "Cream"), (1.69, 0.47, RZ - 0.035, 0.044, "Terracotta"), (1.615, 0.55, RZ - 0.02, 0.048, "Sage"),
+                                  (1.54, 0.64, RZ - 0.032, 0.045, "Terracotta"), (1.69, 0.635, RZ - 0.03, 0.046, "Oat")])   # 가운데 바구니: 털실 뭉치
+
+def basket_plushies(name, specs, rim_x, rim_z, coll="Bookshelf"):
+    """바구니 속 작은 인형들 (얼굴 빼꼼 + 앞발을 테두리에 걸침): 토끼 / 곰 / 고양이 (specs: (종류, x, y, 머리중심z, 방향))"""
+    def pm(nm, rgba, sheen=0.7):
+        if nm in bpy.data.materials:
+            return bpy.data.materials[nm]
+        m = bpy.data.materials.new(nm); m.use_nodes = True
+        nt = m.node_tree; b = nt.nodes.get("Principled BSDF")
+        b.inputs["Base Color"].default_value = rgba; b.inputs["Roughness"].default_value = 0.9
+        for key in ("Sheen Weight", "Sheen"):
+            if key in b.inputs:
+                b.inputs[key].default_value = sheen; break
+        nz = nt.nodes.new("ShaderNodeTexNoise"); nz.inputs["Scale"].default_value = 800.0
+        bp = nt.nodes.new("ShaderNodeBump"); bp.inputs["Strength"].default_value = 0.3; bp.inputs["Distance"].default_value = 0.001
+        nt.links.new(nz.outputs["Fac"], bp.inputs["Height"]); nt.links.new(bp.outputs["Normal"], b.inputs["Normal"])
+        m.diffuse_color = rgba
+        return m
+    fur = {"bunny": pm("Plush_Bunny_Cream", (0.95, 0.93, 0.88, 1)), "bear": pm("Plush_Bear_Oat", (0.78, 0.63, 0.47, 1)),
+           "cat": pm("Plush_Cat_Gray", (0.74, 0.74, 0.76, 1))}
+    light = pm("Plush_Muzzle_Cream", (0.96, 0.92, 0.84, 1))
+    pink = pm("Plush_Pink", (0.94, 0.66, 0.66, 1), 0.3)
+    dark = pm("Plush_Eye_Dark", (0.1, 0.07, 0.06, 1), 0.0)
+    cl = bpy.data.collections.get(coll) or bpy.context.scene.collection
+
+    def ell(bm, c, r, rot=(0, 0, 0), seg=(20, 12)):
+        mtx = Matrix.Translation(c) @ Euler(rot).to_matrix().to_4x4() @ Matrix.Diagonal((r[0], r[1], r[2], 1))
+        bmesh.ops.create_uvsphere(bm, u_segments=seg[0], v_segments=seg[1], radius=1.0, matrix=mtx)
+
+    for i, (kind, px, py, pz, face) in enumerate(specs):
+        root = bpy.data.objects.new("%s_%d_%s" % (name, i + 1, kind.capitalize()), None); cl.objects.link(root)
+        root.location = (px, py, pz); root.rotation_euler = (0, 0, face)
+        R = 0.044
+        paw_x, rim_dz = abs(px - rim_x) - 0.004, rim_z - pz   # 머리 중심 기준 테두리까지 거리
+        parts = {}
+        def bm_of(m):
+            return parts.setdefault(m.name, (m, bmesh.new()))[1]
+        f = fur[kind]
+        ell(bm_of(f), (0, 0, 0), (R * 0.95, R, R * 0.92), seg=(28, 16))          # 머리
+        ell(bm_of(f), (-0.008, 0, -0.15), (0.046, 0.05, 0.14))                   # 몸 (바구니 바닥까지)
+        for sd in (-1, 1):   # 팔: 앞발을 바구니 테두리 위에 걸침
+            sh, pw = Vector((0.0, sd * 0.034, -0.055)), Vector((paw_x, sd * 0.03, rim_dz + 0.008))
+            dv = pw - sh
+            ell(bm_of(f), tuple((sh + pw) / 2), (dv.length / 2 + 0.006, 0.012, 0.012), tuple(dv.to_track_quat('X', 'Z').to_euler()))
+            ell(bm_of(f), tuple(pw), (0.013, 0.012, 0.009))
+        def on_face(y, z, inset):
+            x = math.sqrt(max((R * 0.95) ** 2 * (1 - (y / R) ** 2 - (z / (R * 0.92)) ** 2), 0)) - inset
+            return (x, y, z), math.atan2(y, max(x, 1e-4))
+        for sd in (-1, 1):
+            c, rz = on_face(sd * 0.015, 0.006, 0.0015)
+            ell(bm_of(dark), c, (0.0025, 0.0042, 0.0048), (0, 0, rz), seg=(10, 8))
+            c, rz = on_face(sd * 0.026, -0.008, 0.001)
+            ell(bm_of(pink), c, (0.0015, 0.006, 0.0035), (0, 0, rz), seg=(10, 6))
+        if kind == "bunny":
+            for sd in (-1, 1):
+                ell(bm_of(f), (-0.006, sd * 0.017, R + 0.03), (0.009, 0.014, 0.04), (sd * math.radians(-12), math.radians(-8), 0))
+                ell(bm_of(pink), (0.0025, sd * 0.017, R + 0.03), (0.002, 0.008, 0.03), (sd * math.radians(-12), math.radians(-8), 0), seg=(12, 8))
+            c, _ = on_face(0, -0.007, 0.0)
+            ell(bm_of(pink), c, (0.0022, 0.0035, 0.0025), seg=(10, 6))
+        elif kind == "bear":
+            for sd in (-1, 1):
+                ell(bm_of(f), (-0.004, sd * 0.031, R * 0.75), (0.009, 0.015, 0.015))
+                ell(bm_of(light), (0.002, sd * 0.031, R * 0.75), (0.004, 0.009, 0.009), seg=(12, 8))
+            ell(bm_of(light), (R * 0.8, 0, -0.012), (0.014, 0.019, 0.013))
+            ell(bm_of(dark), (R * 0.8 + 0.012, 0, -0.008), (0.003, 0.0055, 0.004), seg=(10, 6))
+        else:   # cat
+            for sd in (-1, 1):
+                mtx = Matrix.Translation((-0.002, sd * 0.026, R * 0.82)) @ Euler((sd * math.radians(-20), 0, 0)).to_matrix().to_4x4()
+                bmesh.ops.create_cone(bm_of(f), cap_ends=True, segments=16, radius1=0.015, radius2=0.002, depth=0.03,
+                                      matrix=mtx @ Matrix.Translation((0, 0, 0.012)) @ Matrix.Diagonal((0.6, 1, 1, 1)))
+                bmesh.ops.create_cone(bm_of(pink), cap_ends=True, segments=12, radius1=0.008, radius2=0.001, depth=0.02,
+                                      matrix=mtx @ Matrix.Translation((0.006, 0, 0.01)) @ Matrix.Diagonal((0.3, 1, 1, 1)))
+            c, _ = on_face(0, -0.008, 0.0)
+            ell(bm_of(pink), c, (0.002, 0.004, 0.0025), seg=(10, 6))
+        for mname, (m, bm) in parts.items():
+            me = bpy.data.meshes.new("%s_%s" % (root.name, mname)); bm.to_mesh(me); bm.free()
+            for p in me.polygons:
+                p.use_smooth = True
+            me.materials.append(m)
+            o = bpy.data.objects.new(me.name, me); cl.objects.link(o); o.parent = root
+basket_plushies("Shelf_Basket_Plush", [("bunny", 1.535, 0.115, RZ + 0.038, math.pi + 0.12), ("bear", 1.54, 0.21, RZ + 0.042, math.pi), ("cat", 1.535, 0.305, RZ + 0.038, math.pi - 0.12)], SX0 + 0.012, RZ)   # 입구 쪽 바구니: 얼굴만 빼꼼 내민 인형 3개
+
+def mini_cushions(name, specs, coll="Bookshelf"):
+    """작은 쿠션: 가운데가 볼록하고 모서리가 뾰족하게 모이는 쿠션 모양 (specs: (x, y, 아래z, 크기, 두께, 뒤로 기울기, 회전, 재질이름))"""
+    cl = bpy.data.collections.get(coll) or bpy.context.scene.collection
+    for i, (cx, cy, z0, S, T, lean, turn, mname) in enumerate(specs):
+        m = bpy.data.materials.get(mname)
+        bm = bmesh.new()
+        bmesh.ops.create_cube(bm, size=1.0)
+        bmesh.ops.subdivide_edges(bm, edges=bm.edges[:], cuts=10, use_grid_fill=True)
+        for v in bm.verts:
+            ny, nz = 2 * v.co.y, 2 * v.co.z
+            puff = 0.25 + 0.75 * max(1 - abs(ny) ** 2.5, 0) * max(1 - abs(nz) ** 2.5, 0)
+            v.co.x *= T * puff
+            v.co.y *= S * (1 - 0.06 * (1 - abs(nz)))   # 옆선이 살짝 안으로 들어감
+            v.co.z *= S * (1 - 0.06 * (1 - abs(ny)))
+        me = bpy.data.meshes.new("%s_%d" % (name, i + 1)); bm.to_mesh(me); bm.free()
+        for p in me.polygons:
+            p.use_smooth = True
+        me.materials.append(m)
+        o = bpy.data.objects.new(me.name, me); cl.objects.link(o)
+        o.location = (cx, cy, z0 + S / 2); o.rotation_euler = (0, math.radians(lean), math.radians(turn))
+        o.modifiers.new("Soft", 'SUBSURF').levels = 2
+mini_cushions("Shelf_Basket_Cushion", [(1.7, 0.135, RZ - 0.07, 0.14, 0.055, 14, 8, "Pillow_Plaid_Sage_Deeper"), (1.705, 0.285, RZ - 0.075, 0.14, 0.055, 16, -8, "Pillow_Sage")])   # 인형 뒤 미니 쿠션 2개
+
+def cup_noodles(name, items, tex_dir, seed=3, coll="Bookshelf"):
+    """컵라면 (상표 없는 직접 그린 디자인): 흰 종이컵 + 맛별 그림 라벨(글자가 양쪽을 봄) + 그림 뚜껑 + 뜯는 탭
+    items: (x, y, 바닥z, 종류 'cup'/'bowl', 맛)"""
+    rnd = random.Random(seed)
+    def img_mat(nm, path):
+        if nm in bpy.data.materials:
+            return bpy.data.materials[nm]
+        m = bpy.data.materials.new(nm); m.use_nodes = True
+        nt = m.node_tree; b = nt.nodes.get("Principled BSDF")
+        b.inputs["Roughness"].default_value = 0.38
+        tx = nt.nodes.new("ShaderNodeTexImage")
+        img = bpy.data.images.load(path); img.pack(); tx.image = img
+        nt.links.new(tx.outputs["Color"], b.inputs["Base Color"])
+        return m
+    def plain(nm, rgba, rough):
+        if nm in bpy.data.materials:
+            return bpy.data.materials[nm]
+        m = bpy.data.materials.new(nm); m.use_nodes = True
+        b = m.node_tree.nodes.get("Principled BSDF")
+        b.inputs["Base Color"].default_value = rgba; b.inputs["Roughness"].default_value = rough
+        m.diffuse_color = rgba
+        return m
+    paper = plain("CupNoodle_Paper_White", (0.95, 0.94, 0.9, 1), 0.5)
+    cl = bpy.data.collections.get(coll) or bpy.context.scene.collection
+    meshes = {}
+    def get(m):
+        if m.name not in meshes:
+            bm = bmesh.new(); meshes[m.name] = (m, bm, bm.loops.layers.uv.new())
+        return meshes[m.name][1], meshes[m.name][2]
+    def tube(m, x, y, za, zb, ra, rb, N=48, phase=0.0, bottom=False):
+        bm, uv = get(m)
+        bot = [bm.verts.new((x + ra * math.cos(2 * math.pi * i / N + phase), y + ra * math.sin(2 * math.pi * i / N + phase), za)) for i in range(N + 1)]
+        top = [bm.verts.new((x + rb * math.cos(2 * math.pi * i / N + phase), y + rb * math.sin(2 * math.pi * i / N + phase), zb)) for i in range(N + 1)]
+        for i in range(N):
+            f = bm.faces.new((bot[i], bot[i + 1], top[i + 1], top[i])); f.smooth = True
+            for lp, (u, v) in zip(f.loops, ((i / N, 0), ((i + 1) / N, 0), ((i + 1) / N, 1), (i / N, 1))):
+                lp[uv].uv = (u, v)
+        if bottom:
+            bm.faces.new(bot[:N][::-1])
+    def disc(m, x, y, z, r, N=48):
+        bm, uv = get(m)
+        ring = [bm.verts.new((x + r * math.cos(2 * math.pi * i / N), y + r * math.sin(2 * math.pi * i / N), z)) for i in range(N)]
+        f = bm.faces.new(ring)
+        for lp in f.loops:
+            th = math.atan2(lp.vert.co.y - y, lp.vert.co.x - x)
+            lp[uv].uv = (0.5 - 0.485 * math.sin(th), 0.5 + 0.485 * math.cos(th))   # 입구 쪽에서 볼 때 글자가 똑바로
+    for (x, y, z0, kind, fl) in items:
+        H_, rb_, rt_ = (0.095, 0.036, 0.047) if kind == "cup" else (0.07, 0.056, 0.076)
+        rr = lambda z: rb_ + (rt_ - rb_) * (z - z0) / H_
+        lab = img_mat("CupNoodle_Label_" + fl, os.path.join(tex_dir, "label_%s.png" % fl))
+        lid = img_mat("CupNoodle_Lid_" + fl, os.path.join(tex_dir, "lid_%s.png" % fl))
+        ph = math.pi / 2 + rnd.uniform(-0.25, 0.25)   # 라벨 글자가 입구 쪽(-x)과 책상 쪽(+x)을 보게
+        tube(paper, x, y, z0, z0 + H_, rb_, rt_, bottom=True)
+        la, lb = z0 + 0.008, z0 + H_ - 0.007
+        tube(lab, x, y, la, lb, rr(la) + 0.0008, rr(lb) + 0.0008, phase=ph)
+        tube(paper, x, y, z0 + H_ - 0.004, z0 + H_ + 0.001, rt_ + 0.0022, rt_ + 0.0022)          # 위 테두리 (말린 종이)
+        tube(paper, x, y, z0 + H_ + 0.001, z0 + H_ + 0.0028, rt_ + 0.0016, rt_ + 0.0016)
+        disc(lid, x, y, z0 + H_ + 0.0028, rt_ + 0.0016)                                           # 그림 뚜껑
+        bm, _ = get(paper)
+        a = math.pi + rnd.uniform(-0.6, 0.6)   # 뜯는 탭 (입구 쪽)
+        bmesh.ops.create_cube(bm, size=1.0, matrix=Matrix.Translation((x + math.cos(a) * (rt_ + 0.009), y + math.sin(a) * (rt_ + 0.009), z0 + H_ + 0.002))
+                              @ Matrix.Rotation(a, 4, 'Z') @ Matrix.Diagonal((0.018, 0.016, 0.0012, 1)))
+    for mname, (m, bm, uv) in meshes.items():
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+        me = bpy.data.meshes.new("%s_%s" % (name, mname)); bm.to_mesh(me); bm.free()
+        me.materials.append(m)
+        o = bpy.data.objects.new(me.name, me); cl.objects.link(o)
+Z4 = shelf_z[3] + 0.025   # 맨 위 칸 바닥
+_cups = []
+for _x, _fl in ((1.535, "Spicy"), (1.695, "Udon")):   # 큰 사발 2개씩 쌓기
+    _cups += [(_x, 0.12, Z4, "bowl", _fl), (_x, 0.12, Z4 + 0.0731, "bowl", _fl)]
+_cols = ["Spicy", "Spicy", "Kimchi", "Shrimp", "Jjajang", "Cheese", "Kimchi"]
+for _j, _fl in enumerate(_cols):
+    for _x in (1.535, 1.695):
+        _cups.append((_x, 0.275 + 0.11 * _j, Z4, "cup", _fl))
+for _j, _x in ((0, 1.535), (0, 1.695), (1, 1.535), (1, 1.695), (3, 1.695), (5, 1.535)):
+    _cups.append((_x, 0.275 + 0.11 * _j, Z4 + 0.0981, "cup", _cols[_j]))
+cup_noodles("Shelf_Cup_Noodles", _cups, os.path.join(ART_DIR, "ramen"))   # 맨 위 칸: 컵라면들
+
+def music_merch(name, x_front, y_lp, y_cds, y_stand, z0, tex_dir, coll="Bookshelf"):
+    """음반·굿즈 진열 (직접 그린 오리지널 디자인): LP 1장(받침대 + 옆으로 살짝 빼낸 레코드) + CD 2장(세워 둠) + 청사과 캐릭터 아크릴 스탠드
+    모두 입구 쪽(-x)을 바라봄"""
+    cl = bpy.data.collections.get(coll) or bpy.context.scene.collection
+    def img_mat(nm, path, rough=0.4, alpha=False):
+        if nm in bpy.data.materials:
+            return bpy.data.materials[nm]
+        m = bpy.data.materials.new(nm); m.use_nodes = True
+        nt = m.node_tree; b = nt.nodes.get("Principled BSDF")
+        b.inputs["Roughness"].default_value = rough
+        tx = nt.nodes.new("ShaderNodeTexImage"); img = bpy.data.images.load(path); img.pack(); tx.image = img
+        nt.links.new(tx.outputs["Color"], b.inputs["Base Color"])
+        if alpha:
+            nt.links.new(tx.outputs["Alpha"], b.inputs["Alpha"])
+            for attr, val in (("surface_render_method", "DITHERED"), ("blend_method", "HASHED")):
+                try:
+                    setattr(m, attr, val)
+                except Exception:
+                    pass
+        return m
+    def plain(nm, rgba, rough=0.4, metal=0.0):
+        if nm in bpy.data.materials:
+            return bpy.data.materials[nm]
+        m = bpy.data.materials.new(nm); m.use_nodes = True
+        b = m.node_tree.nodes.get("Principled BSDF")
+        b.inputs["Base Color"].default_value = rgba; b.inputs["Roughness"].default_value = rough; b.inputs["Metallic"].default_value = metal
+        m.diffuse_color = rgba
+        return m
+    card = plain("Merch_Sleeve_Card", (0.95, 0.94, 0.9, 1), 0.6)
+    vinyl = plain("Merch_Vinyl_Black", (0.02, 0.02, 0.025, 1), 0.18)
+    case = plain("Merch_CD_Case", (0.85, 0.86, 0.88, 1), 0.08)
+    wood = bpy.data.materials.get("Wood_Oak_Light") or plain("Merch_Stand_Wood", (0.72, 0.56, 0.38, 1), 0.5)
+    acryl = plain("Merch_Acrylic_Base", (0.96, 0.97, 0.98, 1), 0.05)
+
+    def obj(oname, bm, m, loc=(0, 0, 0), rot=(0, 0, 0), smooth=False):
+        me = bpy.data.meshes.new(oname); bm.to_mesh(me); bm.free()
+        if smooth:
+            for p in me.polygons:
+                p.use_smooth = True
+        me.materials.append(m)
+        o = bpy.data.objects.new(oname, me); cl.objects.link(o); o.location = loc; o.rotation_euler = rot
+        return o
+    def front_plane(oname, w, h, x, zc, m, loc, rot, yc=0.0):
+        """-x 쪽을 보는 그림 판 (왼→오른쪽이 보는 사람 기준)"""
+        bm = bmesh.new(); uv = bm.loops.layers.uv.new()
+        vs = [bm.verts.new((x, yc + w / 2, zc - h / 2)), bm.verts.new((x, yc - w / 2, zc - h / 2)),
+              bm.verts.new((x, yc - w / 2, zc + h / 2)), bm.verts.new((x, yc + w / 2, zc + h / 2))]
+        f = bm.faces.new(vs)
+        for lp, t in zip(f.loops, ((0, 0), (1, 0), (1, 1), (0, 1))):
+            lp[uv].uv = t
+        bmesh.ops.recalc_face_normals(bm, faces=[f])
+        if f.normal.x > 0:
+            bmesh.ops.reverse_faces(bm, faces=[f])
+        return obj(oname, bm, m, loc, rot)
+    def boxm(bm, x0, x1, y0, y1, za, zb):
+        bmesh.ops.create_cube(bm, size=1.0, matrix=Matrix.Translation(((x0 + x1) / 2, (y0 + y1) / 2, (za + zb) / 2)) @ Matrix.Diagonal((x1 - x0, y1 - y0, zb - za, 1)))
+    # LP 받침대 (원목 턱)
+    S = 0.315
+    bm = bmesh.new(); boxm(bm, x_front, x_front + 0.12, y_lp - 0.17, y_lp + 0.17, z0, z0 + 0.012); boxm(bm, x_front, x_front + 0.012, y_lp - 0.17, y_lp + 0.17, z0, z0 + 0.03)
+    st = obj(name + "_LP_Stand", bm, wood); st.modifiers.new("Round", 'BEVEL').width = 0.002
+    lp_loc, lp_rot = (x_front + 0.02, y_lp, z0 + 0.012), (0, math.radians(14), 0)
+    bm = bmesh.new(); boxm(bm, 0, 0.004, -S / 2, S / 2, 0, S)
+    obj(name + "_LP_Sleeve", bm, card, lp_loc, lp_rot)
+    front_plane(name + "_LP_Cover", S, S, -0.0004, S / 2, img_mat("Merch_LP_Cover", os.path.join(tex_dir, "lp_cover.png")), lp_loc, lp_rot)
+    # 옆으로 살짝 빼낸 레코드
+    vy, vz, R_ = S * 0.47, S / 2 + 0.004, 0.15
+    bm = bmesh.new()
+    bmesh.ops.create_cone(bm, cap_ends=True, segments=64, radius1=R_, radius2=R_, depth=0.0018,
+                          matrix=Matrix.Translation((0.006, vy, vz)) @ Matrix.Rotation(math.radians(90), 4, 'Y'))
+    obj(name + "_LP_Vinyl", bm, vinyl, lp_loc, lp_rot, smooth=False)
+    bm = bmesh.new(); uv = bm.loops.layers.uv.new()
+    ring = [bm.verts.new((0.0049, vy + 0.05 * math.cos(2 * math.pi * i / 40), vz + 0.05 * math.sin(2 * math.pi * i / 40))) for i in range(40)]
+    f = bm.faces.new(ring)
+    for lp in f.loops:
+        lp[uv].uv = (0.5 - 0.5 * (lp.vert.co.y - vy) / 0.05, 0.5 + 0.5 * (lp.vert.co.z - vz) / 0.05)
+    bmesh.ops.recalc_face_normals(bm, faces=[f])
+    if f.normal.x > 0:
+        bmesh.ops.reverse_faces(bm, faces=[f])
+    obj(name + "_LP_Label", bm, img_mat("Merch_LP_Label", os.path.join(tex_dir, "lp_label.png")), lp_loc, lp_rot)
+    # CD 2장 (살짝 기대어 세움)
+    for k, (yc, tex) in enumerate(zip(y_cds, ("cd_cover_a.png", "cd_cover_b.png"))):
+        cw, ch = 0.142, 0.125
+        loc, rot = (x_front + 0.03, yc, z0), (0, math.radians(16), 0)
+        bm = bmesh.new(); boxm(bm, 0, 0.0104, -cw / 2, cw / 2, 0, ch)
+        obj(name + "_CD_%d_Case" % (k + 1), bm, case, loc, rot)
+        front_plane(name + "_CD_%d_Cover" % (k + 1), cw - 0.008, ch - 0.004, -0.0004, ch / 2, img_mat("Merch_CD_Cover_%d" % (k + 1), os.path.join(tex_dir, tex)), loc, rot, yc=0.003)
+        bm = bmesh.new(); boxm(bm, 0.019, 0.045, -0.03, 0.03, 0, 0.03)   # 뒤 받침
+        obj(name + "_CD_%d_Rest" % (k + 1), bm, acryl, loc, (0, 0, 0))
+    # 청사과 캐릭터 아크릴 스탠드
+    A = 0.13
+    loc = (x_front + 0.06, y_stand, z0)
+    bm = bmesh.new()
+    bmesh.ops.create_cone(bm, cap_ends=True, segments=40, radius1=1, radius2=1, depth=0.006, matrix=Matrix.Translation((0, 0, 0.003)) @ Matrix.Diagonal((0.03, 0.05, 1, 1)))
+    obj(name + "_Acrylic_Base", bm, acryl, loc, (0, 0, 0), smooth=True)
+    front_plane(name + "_Acrylic_Apple", A, A, 0.0, A / 2 + 0.004, img_mat("Merch_Acrylic_Apple", os.path.join(tex_dir, "acrylic_apple.png"), 0.15, alpha=True), loc, (0, 0, 0))
+music_merch("Shelf_Merch", SX0 + 0.03, 0.2, (0.6, 0.78), 0.96, shelf_z[2] + 0.025, os.path.join(ART_DIR, "merch"))   # 세 번째 칸: 음반·굿즈 (청사과 테마)
+
 
 # =============== 의자 ①, ② (베이지 부클레 라운드 체어) ===============
 def armchair(name, x, y):
