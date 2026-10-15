@@ -297,6 +297,70 @@ for k, sgn in enumerate((-1, 1)):
     finish("Bed_Headboard_Curve_%d" % k, bm, hb_wood, "Bed")
 # 조명 칸 LED (위 선반 아래쪽 앞부분)
 box("Bed_Headboard_LED", HX0 + 0.02, HX0 + 0.04, HY0 + 0.03, HY1 - 0.03, 0.992, 1.0, mat("LED_Warm", (1.0, 0.88, 0.68, 1), 0.5, emit=6.0), "Bed")
+
+def apple_model(name, x, y, z, R=0.034, turn=0.0, coll="Bed"):
+    """작은 청사과 모형: 위가 살짝 넓고 꼭지 쪽이 쏙 들어간 사과 모양 + 꼭지 + 잎사귀"""
+    def am(nm, setup):
+        if nm in bpy.data.materials:
+            return bpy.data.materials[nm]
+        m = bpy.data.materials.new(nm); m.use_nodes = True
+        setup(m); return m
+    def skin(m):
+        nt = m.node_tree; b = nt.nodes.get("Principled BSDF")
+        b.inputs["Roughness"].default_value = 0.28
+        nz = nt.nodes.new("ShaderNodeTexNoise"); nz.inputs["Scale"].default_value = 60.0
+        rp = nt.nodes.new("ShaderNodeValToRGB")
+        rp.color_ramp.elements[0].color = (0.42, 0.66, 0.2, 1); rp.color_ramp.elements[1].color = (0.7, 0.8, 0.3, 1)
+        rp.color_ramp.elements[0].position = 0.35; rp.color_ramp.elements[1].position = 0.75
+        nt.links.new(nz.outputs["Fac"], rp.inputs["Fac"]); nt.links.new(rp.outputs["Color"], b.inputs["Base Color"])
+        m.diffuse_color = (0.5, 0.72, 0.25, 1)
+    def flat(rgba, rough):
+        def f(m):
+            b = m.node_tree.nodes.get("Principled BSDF")
+            b.inputs["Base Color"].default_value = rgba; b.inputs["Roughness"].default_value = rough
+            m.diffuse_color = rgba
+        return f
+    skin_m = am("Apple_Model_Skin", skin)
+    stem_m = am("Apple_Model_Stem", flat((0.36, 0.24, 0.14, 1), 0.6))
+    leaf_m = am("Apple_Model_Leaf", flat((0.3, 0.52, 0.22, 1), 0.45))
+    cl = bpy.data.collections.get(coll) or bpy.context.scene.collection
+    root = bpy.data.objects.new(name, None); cl.objects.link(root)
+    root.location = (x, y, z); root.rotation_euler = (0, 0, turn)
+    bm = bmesh.new()
+    bmesh.ops.create_uvsphere(bm, u_segments=40, v_segments=24, radius=1.0)
+    for v in bm.verts:
+        px, py, pz = v.co
+        rxy2 = px * px + py * py
+        s = 1.0 + 0.09 * pz                     # 위가 살짝 넓게
+        px, py = px * s, py * s
+        pz *= 0.9
+        if pz > 0:
+            pz -= 0.32 * math.exp(-rxy2 / 0.05)   # 꼭지 쪽 파임
+        else:
+            pz += 0.16 * math.exp(-rxy2 / 0.03)   # 아래 파임
+        v.co = Vector((px * R, py * R, (pz + 0.9) * R * 0.98))
+    me = bpy.data.meshes.new(name + "_Body"); bm.to_mesh(me); bm.free()
+    for p in me.polygons:
+        p.use_smooth = True
+    me.materials.append(skin_m)
+    o = bpy.data.objects.new(me.name, me); cl.objects.link(o); o.parent = root
+    o.modifiers.new("Soft", 'SUBSURF').levels = 1
+    top = R * 0.98 * (0.9 + 0.9 - 0.32)
+    bm = bmesh.new()
+    bmesh.ops.create_cone(bm, cap_ends=True, segments=10, radius1=R * 0.06, radius2=R * 0.045, depth=R * 0.7,
+                          matrix=Matrix.Translation((R * 0.05, 0, top + R * 0.3)) @ Matrix.Rotation(math.radians(12), 4, 'Y'))
+    me = bpy.data.meshes.new(name + "_Stem"); bm.to_mesh(me); bm.free(); me.materials.append(stem_m)
+    so = bpy.data.objects.new(me.name, me); cl.objects.link(so); so.parent = root
+    bm = bmesh.new()
+    bmesh.ops.create_uvsphere(bm, u_segments=16, v_segments=8, radius=1.0,
+                              matrix=Matrix.Translation((R * 0.32, R * 0.12, top + R * 0.42)) @ Matrix.Rotation(math.radians(-25), 4, 'Y') @ Matrix.Rotation(math.radians(15), 4, 'Z')
+                              @ Matrix.Diagonal((R * 0.42, R * 0.2, R * 0.04, 1)))
+    me = bpy.data.meshes.new(name + "_Leaf"); bm.to_mesh(me); bm.free(); me.materials.append(leaf_m)
+    for p in me.polygons:
+        p.use_smooth = True
+    lo = bpy.data.objects.new(me.name, me); cl.objects.link(lo); lo.parent = root
+    return root
+apple_model("Bed_Headboard_Apple", HX0 + 0.09, HY1 - 0.15, 0.8, turn=math.radians(-30))   # 헤드보드 조명 칸 왼쪽 끝: 작은 청사과 모형
 led = bpy.data.lights.new("Headboard_Glow", 'AREA'); led.energy = 12; led.size = 1.2; led.size_y = 0.1
 led.shape = 'RECTANGLE'; led.color = (1.0, 0.85, 0.62)
 lo = bpy.data.objects.new("Headboard_Glow", led); lo.location = (HX0 + 0.1, YC, 0.99); lo.rotation_euler = (0, 0, math.radians(90))
@@ -422,6 +486,37 @@ box("Bed_Mattress", BX0 + 0.03, BX1 - 0.08, BY0 + 0.03, BY1 - 0.03, 0.3, 0.52, s
 # 사계절 이불: 두툼하게 부풀고 구겨진 체크 이불 (침대 옆으로 살짝 흘러내림)
 soften_fabric(plaid)
 puffy_duvet("Bed_Duvet_Plaid", BX0 - 0.05, BX1 - 0.47, BY0 - 0.07, BY1 + 0.03, 0.36, 0.6, plaid, lift=(BX1 - 0.76, 0.14, 0.06))
+def nightstand(name, x0, x1, y0, y1, zf, h=0.56, drawers=3, coll="Bed"):
+    """침대 옆 작은 원목 서랍장: 짧은 다리 + 서랍 3칸(밝은 원목 앞판) + 동그란 손잡이, 앞면은 -x 쪽(침대 발 쪽)"""
+    oak = bpy.data.materials.get("Wood_Oak") or mat("Wood_Oak", (0.6, 0.42, 0.26, 1), 0.55)
+    oak_l = bpy.data.materials.get("Wood_Oak_Light") or mat("Wood_Oak_Light", (0.72, 0.56, 0.38, 1), 0.55)
+    knob_m = bpy.data.materials.get("Nightstand_Knob_Brass") or mat("Nightstand_Knob_Brass", (0.78, 0.62, 0.36, 1), 0.3, 0.8)
+    LEG = 0.09
+    zb, zt = zf + LEG, zf + h - 0.025
+    body = box(name + "_Body", x0 + 0.004, x1, y0, y1, zb, zt, oak, coll)
+    body.modifiers.new("Round", 'BEVEL').width = 0.004
+    top = box(name + "_Top", x0 - 0.01, x1, y0 - 0.012, y1 + 0.012, zt, zf + h, oak, coll)
+    tb = top.modifiers.new("Round", 'BEVEL'); tb.width = 0.006; tb.segments = 3
+    bm = bmesh.new()
+    for lx in (x0 + 0.04, x1 - 0.04):
+        for ly in (y0 + 0.04, y1 - 0.04):
+            bmesh.ops.create_cone(bm, cap_ends=True, segments=16, radius1=0.011, radius2=0.017, depth=LEG,
+                                  matrix=Matrix.Translation((lx, ly, zf + LEG / 2)))
+    finish(name + "_Legs", bm, oak, coll, smooth=True)
+    gap, inner = 0.006, (zt - zb) - 0.012
+    dh = (inner - gap * (drawers - 1)) / drawers
+    fronts, kb = bmesh.new(), bmesh.new()
+    for k in range(drawers):
+        za = zb + 0.006 + k * (dh + gap)
+        bmesh.ops.create_cube(fronts, size=1.0, matrix=Matrix.Translation((x0 - 0.004, (y0 + y1) / 2, za + dh / 2)) @ Matrix.Diagonal((0.016, (y1 - y0) - 0.024, dh, 1)))
+        bmesh.ops.create_uvsphere(kb, u_segments=16, v_segments=10, radius=1.0,
+                                  matrix=Matrix.Translation((x0 - 0.016, (y0 + y1) / 2, za + dh / 2)) @ Matrix.Diagonal((0.009, 0.014, 0.014, 1)))
+        bmesh.ops.create_cone(kb, cap_ends=True, segments=12, radius1=0.005, radius2=0.005, depth=0.012,
+                              matrix=Matrix.Translation((x0 - 0.009, (y0 + y1) / 2, za + dh / 2)) @ Matrix.Rotation(math.radians(90), 4, 'Y'))
+    fo = finish(name + "_Drawer_Fronts", fronts, oak_l, coll)
+    fv = fo.modifiers.new("Round", 'BEVEL'); fv.width = 0.003; fv.segments = 2
+    finish(name + "_Knobs", kb, knob_m, coll, smooth=True)
+nightstand("Bed_Nightstand", W - 0.44, W - 0.02, BY0 - 0.5, BY0 - 0.08, 0.018)   # 침대 머리맡 옆 작은 서랍장 (러그 위)
 # 베개 2개 (눕혀서): 하나는 체크, 하나는 세이지 그린
 for i, (yy, mm) in enumerate(((BY0 + 0.37, plaid_pillow), (BY1 - 0.37, pillow_sage))):
     pw = puffy("Bed_Pillow_%d" % i, BX1 - 0.64, BX1 - 0.22, yy - 0.32, yy + 0.32, 0.52, 0.64, mm, 0.055, 0.012, 0.1, billow=0.015, cuts=8)
@@ -442,6 +537,98 @@ def painting_mat(name, img_path):
     m.diffuse_color = (0.75, 0.85, 0.6, 1)
     return m
 ART_DIR = os.path.join(os.path.expanduser('~/Documents/Claude_Room'), 'textures')
+
+def cd_player(name, cx, cy, zf, turn=0.0, tex_dir=None, coll="Bed"):
+    """세워 두는 CD 플레이어 (상표 없는 일반 디자인): 크림색 네모 몸체 + 앞에 돌아가는 CD가 보이는 투명 덮개 + 아래 받침 스피커 + 위 버튼 (앞면 -x)"""
+    cl = bpy.data.collections.get(coll) or bpy.context.scene.collection
+    def pm(nm, rgba, rough=0.4, metal=0.0, alpha=1.0):
+        if nm in bpy.data.materials:
+            return bpy.data.materials[nm]
+        m = bpy.data.materials.new(nm); m.use_nodes = True
+        b = m.node_tree.nodes.get("Principled BSDF")
+        b.inputs["Base Color"].default_value = rgba; b.inputs["Roughness"].default_value = rough; b.inputs["Metallic"].default_value = metal
+        if alpha < 1:
+            b.inputs["Alpha"].default_value = alpha
+            for attr, val in (("surface_render_method", "DITHERED"), ("blend_method", "HASHED")):
+                try:
+                    setattr(m, attr, val)
+                except Exception:
+                    pass
+        m.diffuse_color = rgba
+        return m
+    body_m = pm("CDPlayer_Cream", (0.93, 0.91, 0.85, 1), 0.35)
+    grille_m = bpy.data.materials.get("CDPlayer_Grille")
+    if grille_m is None:
+        grille_m = bpy.data.materials.new("CDPlayer_Grille"); grille_m.use_nodes = True
+        nt = grille_m.node_tree; b = nt.nodes.get("Principled BSDF"); b.inputs["Roughness"].default_value = 0.6
+        tc = nt.nodes.new("ShaderNodeTexCoord"); ck = nt.nodes.new("ShaderNodeTexChecker"); ck.inputs["Scale"].default_value = 450.0
+        ck.inputs["Color1"].default_value = (0.35, 0.34, 0.32, 1); ck.inputs["Color2"].default_value = (0.12, 0.12, 0.12, 1)
+        nt.links.new(tc.outputs["Object"], ck.inputs["Vector"]); nt.links.new(ck.outputs["Color"], b.inputs["Base Color"])
+        grille_m.diffuse_color = (0.25, 0.25, 0.24, 1)
+    silver = pm("CDPlayer_Silver", (0.8, 0.81, 0.83, 1), 0.2, 1.0)
+    clear = pm("CDPlayer_Clear_Cover", (0.95, 0.97, 1.0, 1), 0.02, 0.0, 0.07)
+    sage = bpy.data.materials.get("Gaming_Chair_Sage_Accent") or pm("CDPlayer_Sage", (0.52, 0.64, 0.45, 1), 0.4)
+    led = pm("CDPlayer_LED", (0.5, 1.0, 0.6, 1), 0.3)
+    if "Emission Strength" in led.node_tree.nodes.get("Principled BSDF").inputs:
+        b = led.node_tree.nodes.get("Principled BSDF")
+        for k in ("Emission Color", "Emission"):
+            if k in b.inputs:
+                b.inputs[k].default_value = (0.5, 1.0, 0.6, 1); break
+        b.inputs["Emission Strength"].default_value = 3.0
+    disc_m = bpy.data.materials.get("CDPlayer_Disc_Print")
+    if disc_m is None:
+        disc_m = bpy.data.materials.new("CDPlayer_Disc_Print"); disc_m.use_nodes = True
+        nt = disc_m.node_tree; b = nt.nodes.get("Principled BSDF"); b.inputs["Roughness"].default_value = 0.25
+        tx = nt.nodes.new("ShaderNodeTexImage"); img = bpy.data.images.load(os.path.join(tex_dir, "cd_disc.png")); img.pack(); tx.image = img
+        nt.links.new(tx.outputs["Color"], b.inputs["Base Color"])
+    root = bpy.data.objects.new(name, None); cl.objects.link(root)
+    root.location = (cx, cy, zf); root.rotation_euler = (0, 0, turn)
+    def ob(oname, bm, m, bev=0.0, smooth=False, rot=(0, 0, 0), loc=(0, 0, 0)):
+        me = bpy.data.meshes.new(oname); bm.to_mesh(me); bm.free()
+        if smooth:
+            for p in me.polygons:
+                p.use_smooth = True
+        me.materials.append(m)
+        o = bpy.data.objects.new(oname, me); cl.objects.link(o); o.parent = root; o.location = loc; o.rotation_euler = rot
+        if bev:
+            bv = o.modifiers.new("Round", 'BEVEL'); bv.width = bev; bv.segments = 4
+        return o
+    def cube(bm, c, s):
+        bmesh.ops.create_cube(bm, size=1.0, matrix=Matrix.Translation(c) @ Matrix.Diagonal((s[0], s[1], s[2], 1)))
+    def disc_x(bm, c, r, depth, segs=48):   # x 방향을 보는 원판
+        bmesh.ops.create_cone(bm, cap_ends=True, segments=segs, radius1=r, radius2=r, depth=depth, matrix=Matrix.Translation(c) @ Matrix.Rotation(math.radians(90), 4, 'Y'))
+    # 받침 (스피커)
+    bm = bmesh.new(); cube(bm, (0, 0, 0.018), (0.09, 0.21, 0.036)); ob(name + "_Base", bm, body_m, 0.008)
+    bm = bmesh.new()
+    for sd in (-1, 1):
+        disc_x(bm, (-0.0455, sd * 0.065, 0.018), 0.012, 0.002, 32)
+    ob(name + "_Speaker_Grilles", bm, grille_m)
+    bm = bmesh.new(); cube(bm, (-0.0455, 0, 0.018), (0.002, 0.07, 0.006)); ob(name + "_Base_Stripe", bm, sage)
+    # 세운 몸체 (뒤로 살짝 기울임)
+    TILT = (0, math.radians(8), 0)
+    pl = (0.008, 0, 0.034)
+    bm = bmesh.new(); cube(bm, (0, 0, 0.1), (0.038, 0.2, 0.2)); ob(name + "_Body", bm, body_m, 0.012, rot=TILT, loc=pl)
+    bm = bmesh.new(); disc_x(bm, (-0.0195, 0, 0.1), 0.068, 0.003); ob(name + "_Disc_Tray", bm, silver, rot=TILT, loc=pl)
+    bm = bmesh.new(); uv = bm.loops.layers.uv.new()
+    N = 64; R = 0.06
+    ring = [bm.verts.new((-0.0222, R * math.cos(2 * math.pi * i / N), 0.1 + R * math.sin(2 * math.pi * i / N))) for i in range(N)]
+    f = bm.faces.new(ring)
+    for lp in f.loops:
+        lp[uv].uv = (0.5 - 0.5 * lp.vert.co.y / R, 0.5 + 0.5 * (lp.vert.co.z - 0.1) / R)
+    bmesh.ops.recalc_face_normals(bm, faces=[f])
+    if f.normal.x > 0:
+        bmesh.ops.reverse_faces(bm, faces=[f])
+    ob(name + "_CD", bm, disc_m, rot=TILT, loc=pl)
+    bm = bmesh.new(); disc_x(bm, (-0.0275, 0, 0.1), 0.07, 0.004); ob(name + "_Clear_Cover", bm, clear, rot=TILT, loc=pl, smooth=True)
+    # 위 버튼 3개 + 전원 불빛
+    bm = bmesh.new()
+    for k in range(3):
+        bmesh.ops.create_cone(bm, cap_ends=True, segments=20, radius1=0.007, radius2=0.006, depth=0.006, matrix=Matrix.Translation((0, -0.025 + k * 0.025, 0.202)))
+    ob(name + "_Buttons", bm, sage, rot=TILT, loc=pl, smooth=True)
+    bm = bmesh.new(); bmesh.ops.create_uvsphere(bm, u_segments=10, v_segments=6, radius=0.0025, matrix=Matrix.Translation((-0.0195, 0.082, 0.185)))
+    ob(name + "_LED", bm, led, rot=TILT, loc=pl, smooth=True)
+    return root
+cd_player("Bed_CD_Player", W - 0.24, BY0 - 0.29, 0.018 + 0.56, turn=0.0, tex_dir=os.path.join(ART_DIR, "merch"))   # 침대 옆 서랍장 위 CD 플레이어
 ARTS = (("Art_Green_Apples", "Painting_Green_Apples_Watercolor", "art_green_apple_3.png"),   # 왼쪽: 청사과 3개
         ("Art_Blue_Guitar", "Painting_Blue_Guitar_Watercolor", "art_guitar_blue_v2.png"))         # 오른쪽: 파란 일렉기타
 for i, x0 in enumerate((2.95, 3.65)):
@@ -606,6 +793,100 @@ def make_cactus(name, cx, cy, cz, coll):
 make_cactus("Peg_Cactus", PX0 - 0.07, 0.72, 1.14, "Study_Zone")
 cyl("Peg_Pen_Cup", 0.035, 1.27, 1.37, PX1 + 0.07, 0.67, M["pot"], "Study_Zone", 16)
 boxes("Peg_Pens", [(PX1 + 0.06, PX1 + 0.065, 0.66, 0.665, 1.3, 1.45), (PX1 + 0.075, PX1 + 0.08, 0.675, 0.68, 1.3, 1.43)], M["plastic"], "Study_Zone")
+
+def pencil_pouch(name, cx, cy, z0, L=0.2, Wd=0.075, Ht=0.058, turn=0.0, coll="Study_Zone"):
+    """지퍼 필통: 폭신한 캔버스 천 파우치 + 위쪽 지퍼(세이지 테이프 + 은색 이빨 + 손잡이) (긴 쪽이 y 방향)"""
+    def pm(nm, rgba, rough, metal=0.0, bump=0.0):
+        if nm in bpy.data.materials:
+            return bpy.data.materials[nm]
+        m = bpy.data.materials.new(nm); m.use_nodes = True
+        nt = m.node_tree; b = nt.nodes.get("Principled BSDF")
+        b.inputs["Base Color"].default_value = rgba; b.inputs["Roughness"].default_value = rough; b.inputs["Metallic"].default_value = metal
+        if bump:
+            tc = nt.nodes.new("ShaderNodeTexCoord"); ck = nt.nodes.new("ShaderNodeTexWave"); ck.inputs["Scale"].default_value = 500.0
+            bp = nt.nodes.new("ShaderNodeBump"); bp.inputs["Strength"].default_value = bump; bp.inputs["Distance"].default_value = 0.001
+            nt.links.new(tc.outputs["Object"], ck.inputs["Vector"]); nt.links.new(ck.outputs["Fac"], bp.inputs["Height"]); nt.links.new(bp.outputs["Normal"], b.inputs["Normal"])
+        m.diffuse_color = rgba
+        return m
+    canvas = pm("Pouch_Canvas_Cream", (0.9, 0.86, 0.76, 1), 0.9, 0, 0.3)
+    tape = bpy.data.materials.get("Gaming_Chair_Sage_Accent") or pm("Pouch_Zip_Tape", (0.52, 0.64, 0.45, 1), 0.7)
+    metal = pm("Pouch_Zip_Metal", (0.8, 0.8, 0.82, 1), 0.25, 1.0)
+    cl = bpy.data.collections.get(coll) or bpy.context.scene.collection
+    root = bpy.data.objects.new(name, None); cl.objects.link(root)
+    root.location = (cx, cy, z0); root.rotation_euler = (0, 0, turn)
+    def ob(oname, bm, m, mods=()):
+        me = bpy.data.meshes.new(oname); bm.to_mesh(me); bm.free()
+        for p in me.polygons:
+            p.use_smooth = True
+        me.materials.append(m)
+        o = bpy.data.objects.new(oname, me); cl.objects.link(o); o.parent = root
+        for kind, val in mods:
+            if kind == "bevel":
+                bv = o.modifiers.new("Round", 'BEVEL'); bv.width = val; bv.segments = 4
+            elif kind == "sub":
+                o.modifiers.new("Soft", 'SUBSURF').levels = val
+        return o
+    # 파우치 몸통: 아래는 납작하고 위가 둥글게 부푼 모양
+    bm = bmesh.new()
+    bmesh.ops.create_cube(bm, size=1.0)
+    bmesh.ops.subdivide_edges(bm, edges=bm.edges[:], cuts=4, use_grid_fill=True)
+    for v in bm.verts:
+        u = v.co.z + 0.5
+        ny = abs(2 * v.co.y)
+        pinch = 1 - 0.35 * (ny ** 4) * u          # 양 끝은 위로 갈수록 모임 (지퍼 끝)
+        v.co.x *= Wd * pinch * (1 - 0.25 * u * u)  # 위쪽이 좁아지는 어묵 모양
+        v.co.y *= L
+        v.co.z = u * Ht
+    ob(name + "_Body", bm, canvas, (("sub", 2),))
+    # 지퍼
+    bm = bmesh.new()
+    bmesh.ops.create_cube(bm, size=1.0, matrix=Matrix.Translation((0, 0, Ht + 0.0005)) @ Matrix.Diagonal((0.012, L * 0.82, 0.003, 1)))
+    ob(name + "_Zip_Tape", bm, tape, (("bevel", 0.001),))
+    bm = bmesh.new()
+    bmesh.ops.create_cube(bm, size=1.0, matrix=Matrix.Translation((0, 0, Ht + 0.0022)) @ Matrix.Diagonal((0.004, L * 0.8, 0.0016, 1)))
+    yp = L * 0.25   # 지퍼 손잡이 위치
+    bmesh.ops.create_cube(bm, size=1.0, matrix=Matrix.Translation((0, yp, Ht + 0.004)) @ Matrix.Diagonal((0.009, 0.012, 0.004, 1)))
+    bmesh.ops.create_cube(bm, size=1.0, matrix=Matrix.Translation((-0.008, yp + 0.004, Ht - 0.004)) @ Matrix.Rotation(math.radians(70), 4, 'Y') @ Matrix.Diagonal((0.02, 0.006, 0.0015, 1)))
+    ob(name + "_Zip_Metal", bm, metal, (("bevel", 0.0007),))
+    return root
+pencil_pouch("Desk_Pencil_Pouch", PX0 - 0.12, 0.3, DH_, turn=math.radians(4))   # 오른쪽 책상 위 타공판 쪽: 지퍼 필통
+
+def desk_pen(name, cx, cy, z0, turn=0.0, coll="Study_Zone"):
+    """책상 위에 눕혀 둔 펜: 세이지 몸통 + 회색 고무 그립 + 은색 펜촉 + 흰 뒷캡과 클립 (긴 쪽이 y 방향)"""
+    def pm(nm, rgba, rough, metal=0.0):
+        if nm in bpy.data.materials:
+            return bpy.data.materials[nm]
+        m = bpy.data.materials.new(nm); m.use_nodes = True
+        b = m.node_tree.nodes.get("Principled BSDF")
+        b.inputs["Base Color"].default_value = rgba; b.inputs["Roughness"].default_value = rough; b.inputs["Metallic"].default_value = metal
+        m.diffuse_color = rgba
+        return m
+    body = bpy.data.materials.get("Gaming_Chair_Sage_Accent") or pm("Pen_Sage", (0.52, 0.64, 0.45, 1), 0.35)
+    grip = pm("Pen_Grip_Gray", (0.35, 0.36, 0.37, 1), 0.8)
+    tip = pm("Pen_Tip_Silver", (0.8, 0.8, 0.82, 1), 0.2, 1.0)
+    cap = pm("Pen_Cap_White", (0.95, 0.95, 0.93, 1), 0.3)
+    R = 0.0048
+    cl = bpy.data.collections.get(coll) or bpy.context.scene.collection
+    root = bpy.data.objects.new(name, None); cl.objects.link(root)
+    root.location = (cx, cy, z0 + R); root.rotation_euler = (0, 0, turn)
+    def seg(bm, ya, yb, ra, rb):
+        bmesh.ops.create_cone(bm, cap_ends=True, segments=20, radius1=ra, radius2=rb, depth=yb - ya,
+                              matrix=Matrix.Translation((0, (ya + yb) / 2, 0)) @ Matrix.Rotation(math.radians(-90), 4, 'X'))
+    parts = [(body, [(-0.035, 0.05, R, R)]), (grip, [(-0.06, -0.035, R * 1.06, R * 1.06)]),
+             (tip, [(-0.072, -0.06, R * 0.35, R * 0.95), (-0.075, -0.072, R * 0.12, R * 0.35)]), (cap, [(0.05, 0.07, R * 1.08, R * 1.08), (0.07, 0.073, R * 1.08, R * 0.7)])]
+    for m, segs in parts:
+        bm = bmesh.new()
+        for ya, yb, ra, rb in segs:
+            seg(bm, ya, yb, ra, rb)
+        if m is cap:   # 클립
+            bmesh.ops.create_cube(bm, size=1.0, matrix=Matrix.Translation((0, 0.052, R * 1.08 + 0.0012)) @ Matrix.Diagonal((0.0028, 0.034, 0.0012, 1)))
+        me = bpy.data.meshes.new("%s_%s" % (name, m.name)); bm.to_mesh(me); bm.free()
+        for p in me.polygons:
+            p.use_smooth = len(p.vertices) == 4
+        me.materials.append(m)
+        o = bpy.data.objects.new(me.name, me); cl.objects.link(o); o.parent = root
+    return root
+desk_pen("Desk_Pen", PX0 - 0.205, 0.31, DH_, turn=math.radians(10))   # 필통 옆 펜
 # 동그란 벽시계: 책상 뒤 벽면, 타공판 위쪽 끝에서 19cm 떨어진 곳 (테두리만 연한 원목)
 CLK_R = 0.125   # 지름 25cm
 CLK_X, CLK_Z = (PX0 + PX1) / 2, PH + 0.19 + CLK_R   # 타공판 위 19cm
