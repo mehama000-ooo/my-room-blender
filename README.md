@@ -69,6 +69,21 @@ Claude에게 "침대 옆에 작은 서랍장이랑 CD 플레이어 만들어줘"
 |---|---|
 | ![전](renders/ba_before_nightstand.jpg) | ![후](renders/ba_after_nightstand.jpg) |
 
+## 🌐 방 안내 웹사이트
+
+방에 대해 물어보면 대답하고, 그 물건의 사진을 보여 주는 웹사이트예요. [`website/`](website) 폴더에 있어요.
+
+- **채팅으로 질문:** "기타 보여줘", "책장 맨 아래엔 뭐 있어?"처럼 물어보면 답과 함께 그 물건의 클로즈업 사진이 나와요.
+- **물건마다 낮 · 밤 · 전후 비교:** 24곳의 클로즈업 사진을 낮, 밤, 그 물건이 생기기 전과 후로 볼 수 있어요. 전후 비교는 막대를 끌어서 봐요.
+- **탭:** 렌더 사진, 서랍장 전후 비교, 밤 모드, 투어 영상, 손그림 → 완성
+- Claude에 로그인한 상태로 Claude 안에서 열면 진짜 Claude가 방 정보를 보고 답해요. 그 밖에는 미리 넣어 둔 답 30여 개로 대답해요.
+
+`website/index.html`을 브라우저로 열면 볼 수 있어요. 클로즈업 원본 사진은 [`process/closeups/`](process/closeups)에 있어요.
+
+| 낮 | 밤 | 생기기 전 |
+|---|---|---|
+| ![기타](website/img/cu_guitar.jpg) | ![기타 밤](website/img/cu_guitar_night.jpg) | ![기타 전](website/img/cu_guitar_before.jpg) |
+
 ## 🔁 손그림 → 첫 버전 → 완성
 
 ![비교](renders/compare_before_after.jpg)
@@ -82,7 +97,8 @@ Claude에게 "침대 옆에 작은 서랍장이랑 CD 플레이어 만들어줘"
 | `my_room.blend` | 완성된 Blender 파일 (그림, 사진 텍스처 포함) |
 | `build_room.py` | 방 전체를 만드는 Python 코드 (Blender에서 실행) |
 | `renders/` | 완성 렌더링 사진 |
-| `process/` | 수정하면서 찍은 중간 과정 사진 |
+| `process/` | 수정하면서 찍은 중간 과정 사진 (`closeups/`: 물건별 낮·밤·전후 사진) |
+| `website/` | 방 안내 웹사이트 (index.html, 사진, 투어 영상) |
 | `textures/` | 직접 만든 수채화 그림, 폴라로이드 사진, 의자 뒷면 청사과 그림, 컵라면 라벨(`ramen/`), 음반·굿즈 그림(`merch/`) |
 
 ## ▶️ 직접 실행해 보기
