@@ -55,9 +55,19 @@
 
 ## 🎬 방 투어 영상
 
-문에서 시작해서 사진 벽 → 거울 → 화장대 → 책상 → 책장 → 침대 순서로 한 바퀴 도는 15초 영상이에요.
+문에서 시작해서 사진 벽 → 거울 → 화장대를 지나, 커튼을 걷고 책상 → 침대 쪽으로 들어가는 15초 영상이에요.
 
 ▶️ [`renders/room_tour.mp4`](renders/room_tour.mp4)
+
+## 💬 시연 영상
+
+Claude에게 "침대 옆에 작은 서랍장이랑 CD 플레이어 만들어줘"라고 요청하면, Blender에서 바로 반영되는 과정을 보여 주는 15초 시연 영상이에요. 가구가 생기기 전과 후를 슬라이더로 비교할 수 있어요.
+
+▶️ [`renders/room_demo.webm`](renders/room_demo.webm)
+
+| 전 | 후 |
+|---|---|
+| ![전](renders/ba_before_nightstand.jpg) | ![후](renders/ba_after_nightstand.jpg) |
 
 ## 🔁 손그림 → 첫 버전 → 완성
 
