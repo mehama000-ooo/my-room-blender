@@ -69,6 +69,12 @@ Claude에게 "침대 옆에 작은 서랍장이랑 CD 플레이어 만들어줘"
 |---|---|
 | ![전](renders/ba_before_nightstand.jpg) | ![후](renders/ba_after_nightstand.jpg) |
 
+## 🎤 발표자료
+
+과제 발표용 슬라이드 14장이에요. 무엇을 만들었는지, 바이브 코딩 과정, 얻은 것, AI 접목 아이디어, 앞으로의 계획을 담았어요.
+
+📄 [`presentation/my_room_presentation.pdf`](presentation/my_room_presentation.pdf)
+
 ## 🌐 방 안내 웹사이트
 
 방에 대해 물어보면 대답하고, 그 물건의 사진을 보여 주는 웹사이트예요. [`website/`](website) 폴더에 있어요.
@@ -98,6 +104,7 @@ Claude에게 "침대 옆에 작은 서랍장이랑 CD 플레이어 만들어줘"
 | `build_room.py` | 방 전체를 만드는 Python 코드 (Blender에서 실행) |
 | `renders/` | 완성 렌더링 사진 |
 | `process/` | 수정하면서 찍은 중간 과정 사진 (`closeups/`: 물건별 낮·밤·전후 사진) |
+| `presentation/` | 발표자료 PDF (14장) |
 | `website/` | 방 안내 웹사이트 (index.html, 사진, 투어 영상) |
 | `textures/` | 직접 만든 수채화 그림, 폴라로이드 사진, 의자 뒷면 청사과 그림, 컵라면 라벨(`ramen/`), 음반·굿즈 그림(`merch/`) |
 
