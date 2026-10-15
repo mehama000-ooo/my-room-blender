@@ -173,17 +173,179 @@ for o in (mirror, glass):
     o.location = (0.27, 2.8 + 0.14 + 0.3, 0)   # 거울 입구쪽 끝 = 러그 겉에서 2번째 줄
     o.rotation_euler = (0, math.radians(-8), 0)      # 벽에 살짝 기대어 세운 거울
 
+def fairy_lights_on_mirror(name, parent_name, half_w=0.275, z0=0.05, z1=1.725, xc=0.025, R=0.04, pitch=0.17, spacing=0.038, coll="Entry_Zone"):
+    """전신거울을 빙글빙글 감싼 앵두전구 (따뜻한 빛 작은 전구 + 가는 전선), 거울 테두리를 따라 왼쪽 아래 → 위 → 오른쪽 아래"""
+    par = bpy.data.objects[parent_name]
+    cl = bpy.data.collections.get(coll) or bpy.context.scene.collection
+    bulb_m = bpy.data.materials.get("Fairy_Bulb_Warm")
+    if bulb_m is None:
+        bulb_m = bpy.data.materials.new("Fairy_Bulb_Warm"); bulb_m.use_nodes = True
+        b = bulb_m.node_tree.nodes.get("Principled BSDF")
+        b.inputs["Base Color"].default_value = (1.0, 0.8, 0.45, 1); b.inputs["Roughness"].default_value = 0.2
+        for k in ("Emission Color", "Emission"):
+            if k in b.inputs:
+                b.inputs[k].default_value = (1.0, 0.68, 0.25, 1); break
+        b.inputs["Emission Strength"].default_value = 7.0
+        bulb_m.diffuse_color = (1.0, 0.8, 0.45, 1)
+    wire_m = bpy.data.materials.get("Fairy_Wire_Copper")
+    if wire_m is None:
+        wire_m = bpy.data.materials.new("Fairy_Wire_Copper"); wire_m.use_nodes = True
+        b = wire_m.node_tree.nodes.get("Principled BSDF")
+        b.inputs["Base Color"].default_value = (0.72, 0.5, 0.32, 1); b.inputs["Roughness"].default_value = 0.35; b.inputs["Metallic"].default_value = 1.0
+        wire_m.diffuse_color = (0.72, 0.5, 0.32, 1)
+    L1, L2 = z1 - z0, 2 * half_w
+    total = 2 * L1 + L2
+    def frame_pt(s):
+        if s < L1:
+            return Vector((xc, -half_w, z0 + s)), Vector((0, -1, 0))
+        if s < L1 + L2:
+            return Vector((xc, -half_w + (s - L1), z1)), Vector((0, 0, 1))
+        return Vector((xc, half_w, z1 - (s - L1 - L2))), Vector((0, 1, 0))
+    def helix(s):
+        p, n = frame_pt(s)
+        ph = 2 * math.pi * s / pitch
+        return p + n * (R * math.cos(ph)) + Vector((1, 0, 0)) * (R * math.sin(ph) + 0.004)
+    # 전선
+    cu = bpy.data.curves.new(name + "_Wire", 'CURVE'); cu.dimensions = '3D'
+    cu.bevel_depth = 0.0012; cu.bevel_resolution = 2
+    sp = cu.splines.new('POLY')
+    N = int(total / 0.008)
+    sp.points.add(N)
+    for i in range(N + 1):
+        q = helix(total * i / N); sp.points[i].co = (q.x, q.y, q.z, 1)
+    cu.materials.append(wire_m)
+    wo = bpy.data.objects.new(name + "_Wire", cu); cl.objects.link(wo); wo.parent = par
+    # 전구
+    bm = bmesh.new()
+    k = 0
+    s = spacing * 0.5
+    while s < total:
+        q = helix(s)
+        bmesh.ops.create_uvsphere(bm, u_segments=10, v_segments=7, radius=0.0088, matrix=Matrix.Translation(q))
+        s += spacing; k += 1
+    me = bpy.data.meshes.new(name + "_Bulbs"); bm.to_mesh(me); bm.free()
+    for p in me.polygons:
+        p.use_smooth = True
+    me.materials.append(bulb_m)
+    bo = bpy.data.objects.new(me.name, me); cl.objects.link(bo); bo.parent = par
+    # 은은한 빛 (벽과 바닥에 따뜻한 빛이 번지게)
+    ld = bpy.data.lights.new(name + "_Glow", 'AREA'); ld.energy = 18; ld.size = 0.6; ld.size_y = 1.7; ld.shape = 'RECTANGLE'
+    ld.color = (1.0, 0.78, 0.5); ld.specular_factor = 0.0
+    lo = bpy.data.objects.new(name + "_Glow", ld); cl.objects.link(lo); lo.parent = par
+    lo.location = (0.12, 0, 0.9); lo.rotation_euler = (0, math.radians(-90), 0)
+    return k
+fairy_lights_on_mirror("Mirror_Fairy_Lights", "Mirror_Floor_Frame")   # 전신거울을 감싼 앵두전구
+
 VX0, VX1 = 0.05, 0.75                                   # 화장대 (뒷벽 구석)
 box("Vanity_Top", VX0, VX1, D - 0.42, D - 0.02, 0.72, 0.75, M["white"], "Entry_Zone")
-box("Vanity_Drawer", VX0 + 0.05, VX1 - 0.05, D - 0.42, D - 0.05, 0.62, 0.72, M["white"], "Entry_Zone")
+box("Vanity_Drawer", VX0 + 0.05, VX1 - 0.05, D - 0.41, D - 0.05, 0.62, 0.72, M["white"], "Entry_Zone")
 boxes("Vanity_Legs", [(VX0 + 0.02, VX0 + 0.05, D - 0.4, D - 0.37, 0, 0.62), (VX1 - 0.05, VX1 - 0.02, D - 0.4, D - 0.37, 0, 0.62),
                       (VX0 + 0.02, VX0 + 0.05, D - 0.07, D - 0.04, 0, 0.62), (VX1 - 0.05, VX1 - 0.02, D - 0.07, D - 0.04, 0, 0.62)], M["oak_light"], "Entry_Zone")
 box("Vanity_Mirror", (VX0 + VX1) / 2 - 0.2, (VX0 + VX1) / 2 + 0.2, D - 0.05, D - 0.03, 0.8, 1.35, M["mirror"], "Entry_Zone")
 boxes("Vanity_Mirror_Lights", [((VX0 + VX1) / 2 - 0.23, (VX0 + VX1) / 2 - 0.2, D - 0.06, D - 0.03, 0.8, 1.35),
                                ((VX0 + VX1) / 2 + 0.2, (VX0 + VX1) / 2 + 0.23, D - 0.06, D - 0.03, 0.8, 1.35)], M["glow"], "Entry_Zone")
-cyl("Vanity_Bottle_1", 0.02, 0.75, 0.87, VX0 + 0.13, D - 0.15, M["pot"], "Entry_Zone", 12)
-cyl("Vanity_Bottle_2", 0.018, 0.75, 0.83, VX0 + 0.19, D - 0.12, BOOK_COLS[3], "Entry_Zone", 12)
-box("Vanity_Makeup_Box", VX1 - 0.23, VX1 - 0.07, D - 0.25, D - 0.12, 0.75, 0.8, BOOK_COLS[5], "Entry_Zone")
+def vanity_drawers(name, x0, x1, yf, z0, z1, n=2, coll="Entry_Zone"):
+    """화장대 서랍 앞판 (앞면 -y): 서랍 n칸 + 사이 틈 + 황동 손잡이"""
+    front_m = mat("Vanity_Drawer_Front", (0.95, 0.94, 0.92, 1), 0.4)
+    knob_m = bpy.data.materials.get("Nightstand_Knob_Brass") or mat("Nightstand_Knob_Brass", (0.78, 0.62, 0.36, 1), 0.3, 0.8)
+    gap = 0.006
+    w = (x1 - x0 - gap * (n - 1)) / n
+    fb, kb = bmesh.new(), bmesh.new()
+    for k in range(n):
+        xa = x0 + k * (w + gap)
+        bmesh.ops.create_cube(fb, size=1.0, matrix=Matrix.Translation((xa + w / 2, yf - 0.006, (z0 + z1) / 2)) @ Matrix.Diagonal((w, 0.014, z1 - z0, 1)))
+        bmesh.ops.create_uvsphere(kb, u_segments=16, v_segments=10, radius=1.0,
+                                  matrix=Matrix.Translation((xa + w / 2, yf - 0.02, (z0 + z1) / 2)) @ Matrix.Diagonal((0.013, 0.008, 0.013, 1)))
+        bmesh.ops.create_cone(kb, cap_ends=True, segments=12, radius1=0.004, radius2=0.004, depth=0.01,
+                              matrix=Matrix.Translation((xa + w / 2, yf - 0.014, (z0 + z1) / 2)) @ Matrix.Rotation(math.radians(90), 4, 'X'))
+    fo = finish(name + "_Fronts", fb, front_m, coll)
+    fv = fo.modifiers.new("Round", 'BEVEL'); fv.width = 0.003; fv.segments = 2
+    finish(name + "_Knobs", kb, knob_m, coll, smooth=True)
+
+def tissue_box(name, cx, cy, z0, L=0.24, Wd=0.12, Ht=0.085, coll="Entry_Zone"):
+    """곽티슈: 크림색 상자 + 세이지 띠 + 위 구멍 + 봉긋하게 뽑혀 나온 휴지 한 장 (L=Wd면 정사각형 곽티슈)"""
+    box_m = mat("Tissue_Box_Cream", (0.95, 0.93, 0.87, 1), 0.45)
+    band_m = bpy.data.materials.get("Gaming_Chair_Sage_Accent") or mat("Tissue_Box_Sage", (0.52, 0.64, 0.45, 1), 0.45)
+    hole_m = mat("Tissue_Box_Hole", (0.75, 0.73, 0.68, 1), 0.7)
+    paper_m = mat("Tissue_Paper", (0.98, 0.98, 0.97, 1), 0.85)
+    b = box(name + "_Box", cx - L / 2, cx + L / 2, cy - Wd / 2, cy + Wd / 2, z0, z0 + Ht, box_m, coll)
+    bv = b.modifiers.new("Round", 'BEVEL'); bv.width = 0.004; bv.segments = 2
+    box(name + "_Band", cx - L / 2 - 0.0008, cx + L / 2 + 0.0008, cy - Wd / 2 - 0.0008, cy + Wd / 2 + 0.0008, z0 + Ht * 0.35, z0 + Ht * 0.5, band_m, coll)
+    bm = bmesh.new()
+    bmesh.ops.create_cone(bm, cap_ends=True, segments=32, radius1=1, radius2=1, depth=0.0015,
+                          matrix=Matrix.Translation((cx, cy, z0 + Ht + 0.0005)) @ Matrix.Diagonal((L * 0.29, min(0.022, Wd * 0.2), 1, 1)))
+    finish(name + "_Hole", bm, hole_m, coll)
+    # 뽑혀 나온 휴지 한 장 (봉긋한 산 모양 + 살짝 주름)
+    bm = bmesh.new()
+    NX, NZ = 16, 8
+    rows = []
+    for j in range(NZ + 1):
+        t = j / NZ
+        row = []
+        for i in range(NX + 1):
+            u = -1 + 2 * i / NX
+            zmax = 0.055 * max(1 - u * u, 0) ** 0.8 + 0.004
+            x = cx + u * L * 0.27 * (1 - 0.35 * t)
+            y = cy + 0.008 * math.sin(u * math.pi * 1.5) * t + 0.006 * t
+            row.append(bm.verts.new((x, y, z0 + Ht - 0.004 + zmax * t)))
+        rows.append(row)
+    for j in range(NZ):
+        for i in range(NX):
+            bm.faces.new((rows[j][i], rows[j][i + 1], rows[j + 1][i + 1], rows[j + 1][i]))
+    t_o = finish(name + "_Tissue", bm, paper_m, coll, smooth=True)
+    sf = t_o.modifiers.new("Thick", 'SOLIDIFY'); sf.thickness = 0.0008
+    t_o.modifiers.new("Soft", 'SUBSURF').levels = 1
+vanity_drawers("Vanity_Drawer", VX0 + 0.05, VX1 - 0.05, D - 0.41, 0.625, 0.715)   # 화장대 서랍 2칸
+tissue_box("Vanity_Tissue", VX1 - 0.13, D - 0.2, 0.75, L=0.11, Wd=0.11, Ht=0.11)   # 화장대 위 정사각형 곽티슈
+def cotton_pad_jar(name, cx, cy, z0, R=0.034, Ht=0.085, coll="Entry_Zone"):
+    """화장솜 통: 투명 아크릴 원통 + 안에 차곡차곡 쌓인 동그란 화장솜 + 크림색 뚜껑"""
+    clear = bpy.data.materials.get("CottonJar_Clear")
+    if clear is None:
+        clear = bpy.data.materials.new("CottonJar_Clear"); clear.use_nodes = True
+        b = clear.node_tree.nodes.get("Principled BSDF")
+        b.inputs["Base Color"].default_value = (0.95, 0.97, 1.0, 1); b.inputs["Roughness"].default_value = 0.05; b.inputs["Alpha"].default_value = 0.15
+        for attr, val in (("surface_render_method", "DITHERED"), ("blend_method", "HASHED")):
+            try:
+                setattr(clear, attr, val)
+            except Exception:
+                pass
+    pad = mat("Cotton_Pad_White", (0.97, 0.97, 0.96, 1), 0.95)
+    lid = mat("Tissue_Box_Cream", (0.95, 0.93, 0.87, 1), 0.45)
+    band = bpy.data.materials.get("Gaming_Chair_Sage_Accent") or mat("Tissue_Box_Sage", (0.52, 0.64, 0.45, 1), 0.45)
+    bm = bmesh.new()   # 투명 통 (얇은 벽 + 바닥)
+    bmesh.ops.create_cone(bm, cap_ends=True, segments=40, radius1=R, radius2=R, depth=Ht, matrix=Matrix.Translation((cx, cy, z0 + Ht / 2)))
+    jo = finish(name + "_Jar", bm, clear, coll, smooth=True)
+    bm = bmesh.new()
+    n, th = 24, 0.0028
+    for k in range(n):
+        z = z0 + 0.004 + k * (th + 0.0003)
+        bmesh.ops.create_cone(bm, cap_ends=True, segments=28, radius1=R - 0.004, radius2=R - 0.004, depth=th, matrix=Matrix.Translation((cx, cy, z + th / 2)))
+    po = finish(name + "_Pads", bm, pad, coll, smooth=True)
+    bv = po.modifiers.new("Round", 'BEVEL'); bv.width = 0.0012; bv.segments = 2
+    bm = bmesh.new()
+    bmesh.ops.create_cone(bm, cap_ends=True, segments=40, radius1=R + 0.0015, radius2=R + 0.0015, depth=0.013, matrix=Matrix.Translation((cx, cy, z0 + Ht + 0.0065)))
+    lo = finish(name + "_Lid", bm, lid, coll, smooth=True)
+    lv = lo.modifiers.new("Round", 'BEVEL'); lv.width = 0.002; lv.segments = 3
+    bm = bmesh.new()
+    bmesh.ops.create_cone(bm, cap_ends=True, segments=40, radius1=R + 0.0018, radius2=R + 0.0018, depth=0.003, matrix=Matrix.Translation((cx, cy, z0 + Ht + 0.004)))
+    finish(name + "_Lid_Band", bm, band, coll, smooth=True)
+cotton_pad_jar("Vanity_Cotton", VX1 - 0.25, D - 0.19, 0.75)   # 곽티슈 옆 화장솜 통
+def cotton_swabs(name, specs, z0, coll="Entry_Zone"):
+    """면봉: 하얀 막대 + 양 끝 솜 (specs: (중심x, 중심y, 방향각도)) 바닥에 눕혀 둠"""
+    stick = mat("Swab_Stick", (0.96, 0.96, 0.95, 1), 0.4)
+    cotton = mat("Cotton_Pad_White", (0.97, 0.97, 0.96, 1), 0.95)
+    L, rs, rt = 0.075, 0.0011, 0.0029
+    sb, cb = bmesh.new(), bmesh.new()
+    for (x, y, ang) in specs:
+        M_ = Matrix.Translation((x, y, z0 + rt)) @ Matrix.Rotation(ang, 4, 'Z')
+        bmesh.ops.create_cone(sb, cap_ends=True, segments=10, radius1=rs, radius2=rs, depth=L - 0.008,
+                              matrix=M_ @ Matrix.Rotation(math.radians(90), 4, 'Y'))
+        for sd in (-1, 1):
+            bmesh.ops.create_uvsphere(cb, u_segments=14, v_segments=8, radius=1.0,
+                                      matrix=M_ @ Matrix.Translation((sd * (L / 2 - 0.004), 0, 0)) @ Matrix.Diagonal((0.0068, rt, rt, 1)))
+    finish(name + "_Sticks", sb, stick, coll, smooth=True)
+    finish(name + "_Tips", cb, cotton, coll, smooth=True)
+cotton_swabs("Vanity_Swabs", [(VX1 - 0.228, D - 0.255, math.radians(-34)), (VX1 - 0.213, D - 0.244, math.radians(-27))], 0.75)   # 화장솜 통 앞 면봉 2개
 cyl("Vanity_Stool", 0.17, 0.0, 0.45, (VX0 + VX1) / 2, D - 0.75, M["boucle"], "Entry_Zone", 32)
 
 RX0, RX1, RY0, RY1 = 0.02, DIV - 0.05, 2.8, 4.97              # 네모난 라탄(주트) 러그
@@ -252,6 +414,89 @@ for i, (px, pz, ang) in enumerate(((OX0 + 0.16, 1.52, -6), ((OX0 + OX1) / 2 + 0.
     head = cyl("Push_Pin_%d" % (i + 1), 0.0065, -0.004, 0.004, 0, 0, pin_green, "Wardrobe", 20)
     head.rotation_euler = (math.radians(90), 0, 0); head.location = pin_loc
     bevp = head.modifiers.new("Round", 'BEVEL'); bevp.width = 0.002; bevp.segments = 3
+
+def photo_strings(name, y0, y1, rows, photos, sag=0.06, coll="Entry_Zone"):
+    """왼쪽 벽(x=0)에 끈을 걸고 나무 집게로 폴라로이드 사진을 매단 장식 (rows: 끈 높이들, photos: 줄마다 사진 파일 목록)"""
+    twine = mat("Photo_String_Twine", (0.72, 0.58, 0.42, 1), 0.85)
+    pin_m = mat("Photo_Clip_Wood", (0.82, 0.68, 0.5, 1), 0.6)
+    nail = mat("Photo_String_Nail", (0.8, 0.8, 0.82, 1), 0.25, 1.0)
+    cl = bpy.data.collections.get(coll) or col(coll)
+    XW = 0.008
+    def zs(y, ze):
+        t = (y - y0) / (y1 - y0)
+        return ze - sag * 4 * t * (1 - t)
+    clip_bm, nail_bm = bmesh.new(), bmesh.new()
+    rnd = random.Random(9)
+    for r, (ze, files) in enumerate(zip(rows, photos)):
+        cu = bpy.data.curves.new("%s_Twine_%d" % (name, r + 1), 'CURVE'); cu.dimensions = '3D'
+        cu.bevel_depth = 0.0015; cu.bevel_resolution = 2
+        sp = cu.splines.new('POLY'); N = 60; sp.points.add(N)
+        for i in range(N + 1):
+            y = y0 + (y1 - y0) * i / N; sp.points[i].co = (XW, y, zs(y, ze), 1)
+        cu.materials.append(twine)
+        o = bpy.data.objects.new(cu.name, cu); cl.objects.link(o)
+        for yy in (y0, y1):   # 양 끝 못
+            bmesh.ops.create_cone(nail_bm, cap_ends=True, segments=12, radius1=0.0035, radius2=0.0035, depth=0.003,
+                                  matrix=Matrix.Translation((0.0125, yy, ze)) @ Matrix.Rotation(math.radians(90), 4, 'Y'))
+            bmesh.ops.create_cone(nail_bm, cap_ends=True, segments=8, radius1=0.0012, radius2=0.0012, depth=0.012,
+                                  matrix=Matrix.Translation((0.006, yy, ze)) @ Matrix.Rotation(math.radians(90), 4, 'Y'))
+        n = len(files)
+        for k, fn in enumerate(files):
+            t = (k + 0.5) / n
+            yc = y0 + (y1 - y0) * t
+            ztop = zs(yc, ze) - 0.004
+            ang = math.radians(rnd.uniform(-6, 6))
+            bm = bmesh.new(); uv = bm.loops.layers.uv.new("UVMap")
+            vs = [bm.verts.new(p) for p in ((0, -PW / 2, -PH), (0, PW / 2, -PH), (0, PW / 2, 0), (0, -PW / 2, 0))]
+            f = bm.faces.new(vs)
+            for lp, c in zip(f.loops, ((0, 0), (1, 0), (1, 1), (0, 1))):
+                lp[uv].uv = c
+            bmesh.ops.recalc_face_normals(bm, faces=[f])
+            if f.normal.x < 0:
+                bmesh.ops.reverse_faces(bm, faces=[f])
+            key = os.path.splitext(fn)[0]
+            ph = finish("%s_Photo_%d_%d" % (name, r + 1, k + 1), bm, photo_mat("Photo_" + key, os.path.join(PHOTO_DIR, fn)), coll, (0.004, yc, ztop))
+            ph.rotation_euler = (ang, 0, 0)
+            cy_, cz_ = yc - 0.0 * math.sin(ang), ztop
+            bmesh.ops.create_cube(clip_bm, size=1.0, matrix=Matrix.Translation((0.0075, cy_, cz_ - 0.008)) @ Matrix.Rotation(ang, 4, 'X') @ Matrix.Diagonal((0.007, 0.009, 0.032, 1)))
+    co = finish(name + "_Clips", clip_bm, pin_m, coll)
+    co.modifiers.new("Round", 'BEVEL').width = 0.0015
+    finish(name + "_Nails", nail_bm, nail, coll, smooth=True)
+photo_strings("Wall_Photo_String", 1.15, 2.75, (1.68, 1.32),
+              (["polaroid_sky_1.png", "polaroid_memory_1.png", "polaroid_memory_2.png", "polaroid_memory_3.png", "polaroid_sky_2.png"],
+               ["polaroid_memory_4.png", "polaroid_memory_5.png", "polaroid_sky_3.png", "polaroid_memory_6.png", "polaroid_memory_7.png"]))   # 전신거울 옆 벽: 끈에 집게로 매단 사진들
+
+def string_fairy_lights(name, y0, y1, rows, sag=0.06, R=0.006, pitch=0.26, spacing=0.1, bulb_r=0.0055, coll="Entry_Zone"):
+    """사진 끈을 따라 느슨하게 감은 작은 앵두전구 (끈 = x 0.008, 처짐 sag)"""
+    bulb_m = bpy.data.materials.get("Fairy_Bulb_Warm") or mat("Fairy_Bulb_Warm", (1.0, 0.8, 0.45, 1), 0.2, emit=7.0)
+    wire_m = bpy.data.materials.get("Fairy_Wire_Copper") or mat("Fairy_Wire_Copper", (0.72, 0.5, 0.32, 1), 0.35, 1.0)
+    cl = bpy.data.collections.get(coll) or col(coll)
+    def pt(s, ze):   # 끈 위의 점 (s: y 방향 거리)
+        y = y0 + s; t = s / (y1 - y0)
+        return Vector((0.008, y, ze - sag * 4 * t * (1 - t)))
+    def helix(s, ze):
+        ph = 2 * math.pi * s / pitch
+        return pt(s, ze) + Vector((0.002 + R * math.sin(ph), 0, R * math.cos(ph)))
+    L = y1 - y0
+    bm = bmesh.new()
+    for r, ze in enumerate(rows):
+        cu = bpy.data.curves.new("%s_Wire_%d" % (name, r + 1), 'CURVE'); cu.dimensions = '3D'
+        cu.bevel_depth = 0.0009; cu.bevel_resolution = 2
+        sp = cu.splines.new('POLY'); N = int(L / 0.008); sp.points.add(N)
+        for i in range(N + 1):
+            q = helix(L * i / N, ze); sp.points[i].co = (q.x, q.y, q.z, 1)
+        cu.materials.append(wire_m)
+        o = bpy.data.objects.new(cu.name, cu); cl.objects.link(o)
+        s = spacing * (0.3 + 0.4 * r)
+        while s < L - 0.02:
+            bmesh.ops.create_uvsphere(bm, u_segments=10, v_segments=7, radius=bulb_r, matrix=Matrix.Translation(helix(s, ze)))
+            s += spacing
+    me = bpy.data.meshes.new(name + "_Bulbs"); bm.to_mesh(me); bm.free()
+    for p in me.polygons:
+        p.use_smooth = True
+    me.materials.append(bulb_m)
+    bo = bpy.data.objects.new(me.name, me); cl.objects.link(bo)
+string_fairy_lights("Wall_Photo_Fairy", 1.15, 2.75, (1.68, 1.32))   # 사진 끈에 살짝 감은 작은 앵두전구
 
 # =============== 침대 (머리 = 오른쪽 벽) + 액자 + 협탁 ===============
 BX0, BX1, BY0, BY1 = 2.30, W - 0.02, D - 1.47, D - 0.07
@@ -482,6 +727,116 @@ def soften_fabric(m, sheen=0.75, bump=0.22):
         bp = nt.nodes.new("ShaderNodeBump"); bp.inputs["Strength"].default_value = bump; bp.inputs["Distance"].default_value = 0.002
         nt.links.new(nz.outputs["Fac"], bp.inputs["Height"]); nt.links.new(bp.outputs["Normal"], b.inputs["Normal"])
 
+BODY_PTS = [(0.0372, -0.2311), (0.0677, -0.2264), (0.0856, -0.2212), (0.1159, -0.2058), (0.1383, -0.1832), (0.1464, -0.1692), (0.1547, -0.1452), (0.16, -0.1116), (0.158, -0.0691), (0.1515, -0.0397), (0.1301, 0.0175), (0.1263, 0.0375), (0.1338, 0.1026), (0.1308, 0.1347), (0.1196, 0.1673), (0.0984, 0.2079), (0.0888, 0.2219), (0.079, 0.226), (0.0737, 0.2236), (0.0685, 0.2146), (0.0552, 0.1544), (0.049, 0.1383), (0.0412, 0.1272), (0.0314, 0.1213), (0.0092, 0.1182), (-0.0197, 0.1191), (-0.0343, 0.1232), (-0.0456, 0.1351), (-0.0552, 0.1576), (-0.0742, 0.2422), (-0.0805, 0.2521), (-0.091, 0.2546), (-0.1021, 0.2451), (-0.1163, 0.2173), (-0.1278, 0.183), (-0.1356, 0.1463), (-0.1379, 0.1062), (-0.1286, 0.0375), (-0.1321, 0.0175), (-0.1535, -0.0397), (-0.16, -0.0691), (-0.162, -0.1116), (-0.1567, -0.1452), (-0.1484, -0.1692), (-0.1355, -0.1895), (-0.1179, -0.2058), (-0.0958, -0.218), (-0.0692, -0.2264), (-0.0381, -0.2311), (-0.0056, -0.2327)]
+PG_PTS = [(0.0475, 0.1164), (0.0625, 0.1159), (0.0825, 0.1087), (0.0913, 0.1019), (0.1016, 0.0869), (0.1084, 0.0663), (0.1155, 0.0241), (0.118, -0.0148), (0.1164, -0.0434), (0.1056, -0.0877), (0.0975, -0.1028), (0.0869, -0.1161), (0.0663, -0.1325), (0.0508, -0.1397), (0.0347, -0.1431), (0.018, -0.1428), (0.0006, -0.1388), (-0.0219, -0.1284), (-0.0387, -0.1139), (-0.0469, -0.1019), (-0.0587, -0.0722), (-0.0713, -0.0087), (-0.0797, 0.0119), (-0.0988, 0.0441), (-0.1044, 0.0619), (-0.1063, 0.0797), (-0.1044, 0.09), (-0.0969, 0.1031), (-0.0847, 0.1127), (-0.075, 0.1164), (-0.0444, 0.1164), (-0.0388, 0.1121), (-0.0215, 0.1073), (0.0088, 0.1062), (0.0343, 0.1096)]
+
+def electric_guitar_on_stand(name, cx, cy, z0=0.0, turn=0.0, coll="Bed"):
+    """스탠드에 세워 둔 일렉기타 (상표 없는 일반 더블 컷어웨이 디자인): 하늘색 몸통 + 크림 픽가드 + 메이플 넥 + 검정 스탠드, 앞면 -y"""
+    cl = bpy.data.collections.get(coll) or col(coll)
+    def pm(nm, rgba, rough, metal=0.0):
+        return bpy.data.materials.get(nm) or mat(nm, rgba, rough, metal)
+    blue = pm("Guitar_Body_Sky_Blue", (0.42, 0.64, 0.8, 1), 0.18)
+    cream = pm("Guitar_Pickguard_Cream", (0.95, 0.92, 0.84, 1), 0.3)
+    maple = pm("Guitar_Neck_Maple", (0.86, 0.7, 0.48, 1), 0.35)
+    chrome = pm("Guitar_Chrome", (0.85, 0.86, 0.88, 1), 0.15, 1.0)
+    black = pm("Guitar_Pickup_Black", (0.05, 0.05, 0.05, 1), 0.4)
+    stand_m = pm("Guitar_Stand_Black", (0.06, 0.06, 0.07, 1), 0.45)
+    rubber = pm("Guitar_Stand_Rubber", (0.12, 0.12, 0.12, 1), 0.8)
+    root = bpy.data.objects.new(name, None); cl.objects.link(root)
+    root.location = (cx, cy, z0); root.rotation_euler = (0, 0, turn)
+    gtr = bpy.data.objects.new(name + "_Guitar", None); cl.objects.link(gtr); gtr.parent = root
+    BZ = 0.3   # 몸통 중심 높이
+    gtr.location = (0, 0, 0.065); gtr.rotation_euler = (math.radians(-14), 0, 0)
+    def ob(oname, bm, m, parent, bev=0.0, smooth=False):
+        me = bpy.data.meshes.new(oname); bm.to_mesh(me); bm.free()
+        if smooth:
+            for p in me.polygons:
+                p.use_smooth = True
+        me.materials.append(m)
+        o = bpy.data.objects.new(oname, me); cl.objects.link(o); o.parent = parent
+        if bev:
+            bv = o.modifiers.new("Round", 'BEVEL'); bv.width = bev; bv.segments = 3; bv.limit_method = 'ANGLE'
+        return o
+    def slab(pts, y0, y1, zoff):
+        bm = bmesh.new()
+        f = bm.faces.new([bm.verts.new((x, y0, z + zoff)) for x, z in pts])
+        ext = bmesh.ops.extrude_face_region(bm, geom=[f])
+        bmesh.ops.translate(bm, verts=[e for e in ext["geom"] if isinstance(e, bmesh.types.BMVert)], vec=(0, y1 - y0, 0))
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+        return bm
+    def cube(bm, c, s, rot=None):
+        m = Matrix.Translation(c)
+        if rot is not None:
+            m = m @ rot
+        bmesh.ops.create_cube(bm, size=1.0, matrix=m @ Matrix.Diagonal((s[0], s[1], s[2], 1)))
+    ZO = BZ - 0.065   # 기타 로컬에서 몸통 중심
+    ob(name + "_Body", slab(BODY_PTS, -0.021, 0.021, ZO), blue, gtr, 0.009, True)
+    ob(name + "_Pickguard", slab(PG_PTS, -0.0235, -0.0205, ZO), cream, gtr, 0.001)
+    # 넥 + 지판 + 프렛 + 헤드
+    NZ0, NZ1 = ZO + 0.1, ZO + 0.585
+    bm = bmesh.new()
+    vs = [bm.verts.new(p) for p in ((-0.027, -0.03, NZ0), (0.027, -0.03, NZ0), (0.022, -0.03, NZ1), (-0.022, -0.03, NZ1))]
+    f = bm.faces.new(vs); ext = bmesh.ops.extrude_face_region(bm, geom=[f])
+    bmesh.ops.translate(bm, verts=[e for e in ext["geom"] if isinstance(e, bmesh.types.BMVert)], vec=(0, 0.022, 0))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    ob(name + "_Neck", bm, maple, gtr, 0.003)
+    head = [(-0.024, NZ1), (0.024, NZ1), (0.04, NZ1 + 0.05), (0.042, NZ1 + 0.15), (0.03, NZ1 + 0.175), (0.0, NZ1 + 0.182), (-0.03, NZ1 + 0.175), (-0.042, NZ1 + 0.15), (-0.04, NZ1 + 0.05)]
+    ob(name + "_Headstock", slab(head, -0.022, -0.008, 0), maple, gtr, 0.003)
+    bm = bmesh.new()
+    for k in range(21):
+        t = 1 - (1 - 0.94) ** 0  # placeholder
+        zf = NZ1 - 0.012 - (NZ1 - NZ0 - 0.06) * (1 - 0.944 ** k) / (1 - 0.944 ** 21)
+        w = 0.022 + 0.005 * (NZ1 - zf) / (NZ1 - NZ0)
+        cube(bm, (0, -0.0305, zf), (2 * w, 0.0015, 0.0015))
+    cube(bm, (0, -0.0302, NZ1 - 0.004), (0.046, 0.004, 0.005))       # 너트
+    for k in range(3):   # 줄감개 양쪽 3개씩
+        zt = NZ1 + 0.06 + k * 0.035
+        for sd in (-1, 1):
+            bmesh.ops.create_cone(bm, cap_ends=True, segments=12, radius1=0.005, radius2=0.005, depth=0.012,
+                                  matrix=Matrix.Translation((sd * 0.026, -0.027, zt)) @ Matrix.Rotation(math.radians(90), 4, 'X'))
+            cube(bm, (sd * 0.052, -0.012, zt), (0.016, 0.004, 0.01))
+    cube(bm, (0, -0.0245, ZO - 0.115), (0.075, 0.006, 0.016))        # 브릿지
+    ob(name + "_Metal", bm, chrome, gtr, 0.0008)
+    bm = bmesh.new()
+    for zp in (ZO + 0.06, ZO - 0.035):
+        cube(bm, (0, -0.0245, zp), (0.072, 0.004, 0.02))
+    ob(name + "_Pickups", bm, black, gtr, 0.002)
+    bm = bmesh.new()
+    for (kx, kz) in ((0.085, ZO - 0.08), (0.1, ZO - 0.03), (0.075, ZO - 0.125)):
+        bmesh.ops.create_cone(bm, cap_ends=True, segments=16, radius1=0.009, radius2=0.008, depth=0.01,
+                              matrix=Matrix.Translation((kx, -0.0265, kz)) @ Matrix.Rotation(math.radians(90), 4, 'X'))
+    ob(name + "_Knobs", bm, cream, gtr, 0.001, True)
+    bm = bmesh.new()   # 줄 6개
+    for k in range(6):
+        xb, xn = -0.0175 + k * 0.007, -0.016 + k * 0.0064
+        za, zb = ZO - 0.115, NZ1 - 0.004
+        v1, v2 = Vector((xb, -0.0315, za)), Vector((xn, -0.0326, zb))
+        dv = v2 - v1
+        bmesh.ops.create_cone(bm, cap_ends=False, segments=4, radius1=0.0004, radius2=0.0004, depth=dv.length,
+                              matrix=Matrix.Translation((v1 + v2) / 2) @ dv.to_track_quat('Z', 'Y').to_matrix().to_4x4())
+    ob(name + "_Strings", bm, chrome, gtr)
+    # A자 스탠드 (아래 받침 팔 + 뒤 기둥 + 위 넥 걸이)
+    def tube(oname, pts, r, m):
+        cu = bpy.data.curves.new(oname, 'CURVE'); cu.dimensions = '3D'; cu.bevel_depth = r; cu.bevel_resolution = 3; cu.use_fill_caps = True
+        sp = cu.splines.new('POLY'); sp.points.add(len(pts) - 1)
+        for p, c in zip(sp.points, pts):
+            p.co = (c[0], c[1], c[2], 1)
+        cu.materials.append(m)
+        o = bpy.data.objects.new(oname, cu); cl.objects.link(o); o.parent = root
+        return o
+    yb = 0.12   # 기둥 위치 (기타 뒤)
+    tube(name + "_Stand_Base", [(-0.14, -0.1, 0.012), (-0.12, yb, 0.012), (0.12, yb, 0.012), (0.14, -0.1, 0.012)], 0.008, stand_m)
+    tube(name + "_Stand_Arms", [(-0.09, -0.06, 0.07), (-0.07, 0.0, 0.03), (0.0, yb, 0.012), (0.07, 0.0, 0.03), (0.09, -0.06, 0.07)], 0.007, stand_m)
+    top_z = 0.065 + (NZ0 + 0.18) * math.cos(math.radians(14))
+    top_y = (NZ0 + 0.18) * math.sin(math.radians(14)) + 0.012
+    tube(name + "_Stand_Post", [(0.0, yb, 0.012), (0.0, top_y + 0.02, top_z - 0.03)], 0.008, stand_m)
+    tube(name + "_Stand_Yoke", [(-0.035, top_y - 0.01, top_z + 0.02), (-0.03, top_y + 0.012, top_z - 0.02), (0.03, top_y + 0.012, top_z - 0.02), (0.035, top_y - 0.01, top_z + 0.02)], 0.006, rubber)
+    bm = bmesh.new()
+    for sd in (-1, 1):
+        cube(bm, (sd * 0.09, -0.06, 0.075), (0.035, 0.03, 0.015))
+    ob(name + "_Stand_Pads", bm, rubber, root, 0.004)
+    return root
+electric_guitar_on_stand("Bed_Foot_Guitar", BX0 - 0.26, BY1 - 0.38, 0.0)   # 침대 발치 쪽: 스탠드에 세운 일렉기타
 box("Bed_Mattress", BX0 + 0.03, BX1 - 0.08, BY0 + 0.03, BY1 - 0.03, 0.3, 0.52, sheet_sage, "Bed")
 # 사계절 이불: 두툼하게 부풀고 구겨진 체크 이불 (침대 옆으로 살짝 흘러내림)
 soften_fabric(plaid)
@@ -887,6 +1242,50 @@ def desk_pen(name, cx, cy, z0, turn=0.0, coll="Study_Zone"):
         o = bpy.data.objects.new(me.name, me); cl.objects.link(o); o.parent = root
     return root
 desk_pen("Desk_Pen", PX0 - 0.205, 0.31, DH_, turn=math.radians(10))   # 필통 옆 펜
+
+def open_laptop(name, cx, cy, z0, Wd=0.31, Dp=0.215, angle=112, turn=0.0, coll="Study_Zone"):
+    """펼친 노트북 (상표 없음): 은색 몸체 + 검정 키보드 + 터치패드 + 뒤로 젖혀진 화면 (힌지는 -y 벽 쪽, 화면은 사용자 쪽 +y)"""
+    alu = bpy.data.materials.get("Laptop_Silver") or mat("Laptop_Silver", (0.8, 0.81, 0.82, 1), 0.3, 0.7)
+    dark = bpy.data.materials.get("Laptop_Hinge_Dark") or mat("Laptop_Hinge_Dark", (0.18, 0.18, 0.19, 1), 0.5)
+    keys = bpy.data.materials.get("Laptop_Keys") or mat("Laptop_Keys", (0.12, 0.12, 0.13, 1), 0.55)
+    pad = bpy.data.materials.get("Laptop_Trackpad") or mat("Laptop_Trackpad", (0.72, 0.73, 0.75, 1), 0.25, 0.6)
+    screen = bpy.data.materials.get("Laptop_Screen_Black") or mat("Laptop_Screen_Black", (0.02, 0.02, 0.025, 1), 0.08)
+    bezel = bpy.data.materials.get("Laptop_Bezel") or mat("Laptop_Bezel", (0.06, 0.06, 0.065, 1), 0.3)
+    cl = bpy.data.collections.get(coll) or col(coll)
+    root = bpy.data.objects.new(name, None); cl.objects.link(root)
+    root.location = (cx, cy, z0); root.rotation_euler = (0, 0, turn)
+    def ob(oname, bm, m, parent, bev=0.0):
+        me = bpy.data.meshes.new(oname); bm.to_mesh(me); bm.free(); me.materials.append(m)
+        o = bpy.data.objects.new(oname, me); cl.objects.link(o); o.parent = parent
+        if bev:
+            bv = o.modifiers.new("Round", 'BEVEL'); bv.width = bev; bv.segments = 4; bv.limit_method = 'ANGLE'
+        return o
+    def cube(bm, c, s):
+        bmesh.ops.create_cube(bm, size=1.0, matrix=Matrix.Translation(c) @ Matrix.Diagonal((s[0], s[1], s[2], 1)))
+    T = 0.0115
+    bm = bmesh.new(); cube(bm, (0, 0, 0.002 + (T - 0.002) / 2), (Wd, Dp, T - 0.002)); ob(name + "_Base", bm, alu, root, 0.006)
+    # 키보드 (6줄 키) + 터치패드
+    bm = bmesh.new()
+    ky0, rows, kw = -Dp / 2 + 0.03, 6, 0.0165
+    cols = 14
+    kx0 = -(cols * kw) / 2
+    for r in range(rows):
+        y = ky0 + r * (kw + 0.0015) + kw / 2
+        h = kw * (0.55 if r == 0 else 1.0)
+        for c in range(cols):
+            x = kx0 + c * kw + kw / 2
+            cube(bm, (x, y, T + 0.0006), (kw - 0.0025, h - 0.0025, 0.0012))
+    ob(name + "_Keys", bm, keys, root, 0.0006)
+    bm = bmesh.new(); cube(bm, (0, Dp / 2 - 0.05, T + 0.0002), (0.11, 0.068, 0.0006)); ob(name + "_Trackpad", bm, pad, root, 0.002)
+    bm = bmesh.new(); cube(bm, (0, -Dp / 2 + 0.003, 0.009), (Wd * 0.7, 0.006, 0.008)); ob(name + "_Hinge", bm, dark, root, 0.002)
+    # 화면 (힌지 축으로 회전)
+    hinge = bpy.data.objects.new(name + "_Lid_Pivot", None); cl.objects.link(hinge); hinge.parent = root
+    hinge.location = (0, -Dp / 2 + 0.004, T + 0.001); hinge.rotation_euler = (math.radians(angle), 0, 0)
+    bm = bmesh.new(); cube(bm, (0, Dp / 2, 0.003), (Wd, Dp, 0.006)); ob(name + "_Lid", bm, alu, hinge, 0.006)
+    bm = bmesh.new(); cube(bm, (0, Dp / 2, -0.0004), (Wd - 0.006, Dp - 0.006, 0.0008)); ob(name + "_Bezel", bm, bezel, hinge, 0.004)
+    bm = bmesh.new(); cube(bm, (0, Dp / 2 + 0.004, -0.0009), (Wd - 0.022, Dp - 0.03, 0.0006)); ob(name + "_Screen", bm, screen, hinge)
+    return root
+open_laptop("Desk_Laptop", 2.47, 0.36, DH_, turn=math.radians(-5))   # 공부용 책상: 펼친 노트북
 # 동그란 벽시계: 책상 뒤 벽면, 타공판 위쪽 끝에서 19cm 떨어진 곳 (테두리만 연한 원목)
 CLK_R = 0.125   # 지름 25cm
 CLK_X, CLK_Z = (PX0 + PX1) / 2, PH + 0.19 + CLK_R   # 타공판 위 19cm
@@ -2026,6 +2425,7 @@ cd = bpy.data.lights.new("Ceiling_Soft", 'AREA'); cd.energy = 110; cd.size = 2.5
 co = bpy.data.objects.new("Ceiling_Soft", cd); co.location = (W / 2, D / 2, H - 0.02); col("Lights_Cameras").objects.link(co)
 for nm, loc, e in (("Lamp_Vanity", ((VX0 + VX1) / 2, D - 0.15, 1.1), 15),):
     pd = bpy.data.lights.new(nm, 'POINT'); pd.energy = e; pd.color = (1, 0.85, 0.65); pd.shadow_soft_size = 0.05
+    pd.specular_factor = 0.0   # 거울에 동그란 불빛이 비치지 않게
     po = bpy.data.objects.new(nm, pd); po.location = loc; col("Lights_Cameras").objects.link(po)
 
 def camera(name, loc, target, lens=24, ortho=None):
