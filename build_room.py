@@ -821,8 +821,204 @@ def armchair(name, x, y):
         cutter.hide_render = True; cutter.hide_viewport = True
     for lx, ly in ((-0.17, -0.17), (0.17, -0.17), (-0.17, 0.17), (0.17, 0.17)):
         cyl(name + "_Leg_%d_%d" % (int(lx > 0), int(ly > 0)), 0.018, 0.0, 0.38, x + lx, y + ly, M["oak"], "Study_Zone", 12, r2=0.014)
-armchair("Chair_1", 2.4, 0.95)
-armchair("Chair_2", 3.8, 0.95)
+def gaming_chair(name, cx, cy, coll="Study_Zone"):
+    """게이밍 의자: 높은 등받이(헤드레스트+어깨 날개), 버킷 시트, 팔걸이, 5발 바퀴 다리 (등받이는 +y 쪽)"""
+    gc_white = mat("Gaming_Chair_White_Leather", (0.93, 0.93, 0.91, 1), 0.35)
+    gc_accent = mat("Gaming_Chair_Sage_Accent", (0.52, 0.64, 0.45, 1), 0.4)
+    gc_black = mat("Gaming_Chair_Black", (0.06, 0.06, 0.07, 1), 0.4)
+    gc_chrome = mat("Gaming_Chair_Chrome", (0.8, 0.8, 0.82, 1), 0.15, 1.0)
+    SEAT_Z = 0.47
+    # 5발 다리 + 바퀴
+    bm = bmesh.new()
+    for k in range(5):
+        a = 2 * math.pi * k / 5 + 0.3
+        mtx = Matrix.Translation((cx + 0.16 * math.cos(a), cy + 0.16 * math.sin(a), 0.085)) @ Matrix.Rotation(a, 4, 'Z') @ Matrix.Rotation(math.radians(-6), 4, 'Y') @ Matrix.Diagonal((0.32, 0.05, 0.035, 1))
+        bmesh.ops.create_cube(bm, size=1.0, matrix=mtx)
+    base = finish(name + "_Base", bm, gc_black, coll)
+    base.modifiers.new("Round", 'BEVEL').width = 0.008
+    bw = bmesh.new()
+    for k in range(5):
+        a = 2 * math.pi * k / 5 + 0.3
+        for side in (-1, 1):
+            p = Matrix.Translation((cx + 0.3 * math.cos(a) + side * 0.012 * -math.sin(a), cy + 0.3 * math.sin(a) + side * 0.012 * math.cos(a), 0.03))
+            bmesh.ops.create_uvsphere(bw, u_segments=14, v_segments=8, radius=0.03, matrix=p @ Matrix.Diagonal((1, 1, 1, 1)))
+    finish(name + "_Casters", bw, gc_black, coll, smooth=True)
+    cyl(name + "_Gas_Lift", 0.024, 0.1, 0.4, cx, cy, gc_chrome, coll, 24)
+    cyl(name + "_Lift_Cover", 0.035, 0.1, 0.24, cx, cy, gc_black, coll, 24, r2=0.03)
+    box(name + "_Seat_Plate", cx - 0.14, cx + 0.14, cy - 0.12, cy + 0.12, 0.4, 0.42, gc_black, coll)
+    # 버킷 시트 (가운데 + 양옆 볼록한 날개)
+    seat = box(name + "_Seat", cx - 0.25, cx + 0.25, cy - 0.25, cy + 0.22, 0.42, SEAT_Z + 0.03, gc_white, coll)
+    sb = seat.modifiers.new("Round", 'BEVEL'); sb.width = 0.03; sb.segments = 4
+    for sd in (-1, 1):
+        bol = box(name + "_Seat_Bolster_%s" % ("L" if sd > 0 else "R"), cx + sd * 0.25 - 0.045, cx + sd * 0.25 + 0.045, cy - 0.24, cy + 0.2, 0.45, SEAT_Z + 0.08, gc_accent, coll)
+        bb = bol.modifiers.new("Round", 'BEVEL'); bb.width = 0.025; bb.segments = 4
+    # 등받이 (윤곽선 → 두께 → 둥근 모서리), 뒤로 살짝 기울임
+    H, TH = 0.84, 0.11
+    prof = [(0.0, 0.25), (0.2, 0.26), (0.36, 0.27), (0.52, 0.27), (0.6, 0.31), (0.66, 0.29), (0.7, 0.21),
+            (0.76, 0.17), (0.8, 0.19), (0.92, 0.19), (0.97, 0.16), (1.0, 0.1)]
+    outline = [(hw, v * H) for v, hw in prof] + [(-hw, v * H) for v, hw in reversed(prof)]
+    def back_obj(oname, pts, y0, y1, m, bev):
+        bmb = bmesh.new()
+        f = bmb.faces.new([bmb.verts.new((x, y0, z)) for x, z in pts])
+        ext = bmesh.ops.extrude_face_region(bmb, geom=[f])
+        bmesh.ops.translate(bmb, verts=[e for e in ext["geom"] if isinstance(e, bmesh.types.BMVert)], vec=(0, y1 - y0, 0))
+        bmesh.ops.recalc_face_normals(bmb, faces=bmb.faces[:])
+        o = finish(oname, bmb, m, coll)
+        o.location = (cx, cy + 0.2, SEAT_Z + 0.01)
+        o.rotation_euler = (math.radians(-12), 0, 0)
+        bv = o.modifiers.new("Round", 'BEVEL'); bv.width = bev; bv.segments = 4; bv.limit_method = 'ANGLE'
+        return o
+    back_obj(name + "_Backrest", outline, 0.0, TH, gc_white, 0.03)
+    # 등받이 앞면 세이지 그린 줄무늬 2개 + 헤드 쿠션 + 허리 쿠션
+    for sd in (-1, 1):
+        stripe = [(sd * 0.13, 0.02), (sd * 0.2, 0.02), (sd * 0.2, H * 0.6), (sd * 0.15, H * 0.68), (sd * 0.13, H * 0.66)]
+        if sd < 0:
+            stripe = stripe[::-1]
+        back_obj(name + "_Back_Stripe_%s" % ("L" if sd > 0 else "R"), stripe, -0.006, 0.0, gc_accent, 0.002)
+    head = [(-0.13, H * 0.8), (0.13, H * 0.8), (0.13, H * 0.9), (-0.13, H * 0.9)]
+    back_obj(name + "_Head_Pillow", head, -0.045, 0.0, gc_accent, 0.02)
+    lumbar = [(-0.17, H * 0.18), (0.17, H * 0.18), (0.17, H * 0.32), (-0.17, H * 0.32)]
+    back_obj(name + "_Lumbar_Pillow", lumbar, -0.05, 0.0, gc_white, 0.025)
+    # 팔걸이 (검정 기둥 + 패드)
+    for sd in (-1, 1):
+        x = cx + sd * 0.3
+        box(name + "_Arm_Post_%s" % ("L" if sd > 0 else "R"), x - 0.02, x + 0.02, cy + 0.0, cy + 0.06, 0.4, 0.66, gc_black, coll)
+        bx0, bx1 = (cx + 0.14, x + 0.02) if sd > 0 else (x - 0.02, cx - 0.14)
+        box(name + "_Arm_Bracket_%s" % ("L" if sd > 0 else "R"), bx0, bx1, cy - 0.02, cy + 0.08, 0.4, 0.43, gc_black, coll)
+        pad = box(name + "_Arm_Pad_%s" % ("L" if sd > 0 else "R"), x - 0.04, x + 0.04, cy - 0.13, cy + 0.13, 0.66, 0.69, gc_black, coll)
+        pb = pad.modifiers.new("Round", 'BEVEL'); pb.width = 0.012; pb.segments = 3
+def mesh_chair(name, cx, cy, coll="Study_Zone"):
+    """인체공학 메쉬 의자: 하얀 프레임 + 회색 메쉬 등판/허리/시트 + 헤드레스트 + S자 등뼈 + 3D 팔걸이 (등받이는 +y 쪽)"""
+    mw = mat("Mesh_Chair_White_Frame", (0.9, 0.9, 0.89, 1), 0.35)
+    mg = mat("Mesh_Chair_Gray_Pad", (0.55, 0.56, 0.58, 1), 0.5)
+    mb = mat("Mesh_Chair_Black", (0.06, 0.06, 0.07, 1), 0.4)
+    if "Mesh_Chair_Gray_Mesh" in bpy.data.materials:
+        mmesh = bpy.data.materials["Mesh_Chair_Gray_Mesh"]
+    else:
+        mmesh = bpy.data.materials.new("Mesh_Chair_Gray_Mesh"); mmesh.use_nodes = True
+        nt = mmesh.node_tree; bs = nt.nodes.get("Principled BSDF")
+        bs.inputs["Roughness"].default_value = 0.8
+        tc = nt.nodes.new("ShaderNodeTexCoord"); ck = nt.nodes.new("ShaderNodeTexChecker")
+        ck.inputs["Scale"].default_value = 260.0
+        ck.inputs["Color1"].default_value = (0.5, 0.51, 0.53, 1); ck.inputs["Color2"].default_value = (0.3, 0.31, 0.33, 1)
+        nt.links.new(tc.outputs["Object"], ck.inputs["Vector"]); nt.links.new(ck.outputs["Color"], bs.inputs["Base Color"])
+        mmesh.diffuse_color = (0.42, 0.43, 0.45, 1)
+    SEAT_Z = 0.48
+
+    def tube(oname, pts, bevel, m, parent=None, closed=False):
+        cu = bpy.data.curves.new(oname, 'CURVE'); cu.dimensions = '3D'
+        cu.bevel_depth = bevel; cu.bevel_resolution = 4; cu.use_fill_caps = True
+        sp = cu.splines.new('NURBS'); sp.points.add(len(pts) - 1)
+        for p, co in zip(sp.points, pts):
+            p.co = (co[0], co[1], co[2], 1)
+        sp.use_cyclic_u = closed; sp.use_endpoint_u = not closed; sp.order_u = 3
+        o = bpy.data.objects.new(oname, cu); cu.materials.append(m)
+        col(coll).objects.link(o)
+        if parent is not None:
+            o.parent = parent
+        return o
+
+    def panel(oname, pts, y0, y1, m, parent, bev=0.01):
+        bmp = bmesh.new()
+        f = bmp.faces.new([bmp.verts.new((x, y0, z)) for x, z in pts])
+        ext = bmesh.ops.extrude_face_region(bmp, geom=[f])
+        bmesh.ops.translate(bmp, verts=[e for e in ext["geom"] if isinstance(e, bmesh.types.BMVert)], vec=(0, y1 - y0, 0))
+        bmesh.ops.recalc_face_normals(bmp, faces=bmp.faces[:])
+        o = finish(oname, bmp, m, coll)
+        o.parent = parent
+        bv = o.modifiers.new("Round", 'BEVEL'); bv.width = bev; bv.segments = 3; bv.limit_method = 'ANGLE'
+        return o
+
+    def outline(prof, z0, z1):
+        right = [(hw, z0 + (z1 - z0) * t) for t, hw in prof]
+        return right + [(-x, z) for x, z in reversed(right)]
+
+    # 다리: 하얀 5발 + 검정 바퀴 + 검정 가스 실린더 + 메커니즘
+    bm = bmesh.new()
+    for k in range(5):
+        a = 2 * math.pi * k / 5 + 0.3
+        mtx = Matrix.Translation((cx + 0.16 * math.cos(a), cy + 0.16 * math.sin(a), 0.085)) @ Matrix.Rotation(a, 4, 'Z') @ Matrix.Rotation(math.radians(-7), 4, 'Y') @ Matrix.Diagonal((0.33, 0.055, 0.04, 1))
+        bmesh.ops.create_cube(bm, size=1.0, matrix=mtx)
+    b = finish(name + "_Base", bm, mw, coll); b.modifiers.new("Round", 'BEVEL').width = 0.012
+    bw = bmesh.new()
+    for k in range(5):
+        a = 2 * math.pi * k / 5 + 0.3
+        for sd in (-1, 1):
+            bmesh.ops.create_uvsphere(bw, u_segments=14, v_segments=8, radius=0.03,
+                                      matrix=Matrix.Translation((cx + 0.31 * math.cos(a) - sd * 0.012 * math.sin(a), cy + 0.31 * math.sin(a) + sd * 0.012 * math.cos(a), 0.03)))
+    finish(name + "_Casters", bw, mb, coll, smooth=True)
+    cyl(name + "_Gas_Lift", 0.025, 0.1, 0.42, cx, cy, mb, coll, 24)
+    mech = box(name + "_Mechanism", cx - 0.12, cx + 0.12, cy - 0.14, cy + 0.12, 0.38, 0.43, mb, coll)
+    mech.modifiers.new("Round", 'BEVEL').width = 0.01
+    lever = box(name + "_Height_Lever", cx + 0.12, cx + 0.22, cy - 0.06, cy - 0.03, 0.4, 0.41, mw, coll)
+    # 시트: 하얀 프레임 위 회색 메쉬
+    sf = box(name + "_Seat_Frame", cx - 0.26, cx + 0.26, cy - 0.25, cy + 0.23, 0.43, 0.46, mw, coll)
+    sfv = sf.modifiers.new("Round", 'BEVEL'); sfv.width = 0.03; sfv.segments = 4
+    sm = box(name + "_Seat_Mesh", cx - 0.24, cx + 0.24, cy - 0.235, cy + 0.215, 0.455, SEAT_Z + 0.015, mmesh, coll)
+    smv = sm.modifiers.new("Round", 'BEVEL'); smv.width = 0.025; smv.segments = 4
+    # 등받이 (뒤로 12도 기울어진 축에 붙임)
+    hinge = bpy.data.objects.new(name + "_Back_Pivot", None)
+    hinge.location = (cx, cy + 0.2, SEAT_Z + 0.02); hinge.rotation_euler = (math.radians(-12), 0, 0)
+    col(coll).objects.link(hinge)
+    lum_prof = [(0.0, 0.2), (0.5, 0.23), (1.0, 0.21)]
+    up_prof = [(0.0, 0.21), (0.25, 0.245), (0.6, 0.24), (0.85, 0.2), (1.0, 0.13)]
+    head_prof = [(0.0, 0.14), (0.5, 0.16), (1.0, 0.14)]
+    lum = outline(lum_prof, 0.03, 0.2)
+    up = outline(up_prof, 0.23, 0.66)
+    hd = outline(head_prof, 0.75, 0.88)
+    panel(name + "_Lumbar_Mesh", lum, -0.03, -0.012, mmesh, hinge)
+    panel(name + "_Back_Mesh", up, 0.0, 0.016, mmesh, hinge)
+    panel(name + "_Headrest_Mesh", hd, 0.01, 0.026, mmesh, hinge)
+    # 등판 테두리: 조금 더 큰 하얀 판을 메쉬 바로 뒤에 붙여서 얇은 흰 테두리처럼 보이게
+    def ring(oname, outer, inner, y0, y1, m, bev=0.004):
+        bmr = bmesh.new()
+        vo = [bmr.verts.new((x, y0, z)) for x, z in outer]
+        vi = [bmr.verts.new((x, y0, z)) for x, z in inner]
+        n = len(vo)
+        fs = [bmr.faces.new([vo[i], vo[(i + 1) % n], vi[(i + 1) % n], vi[i]]) for i in range(n)]
+        ext = bmesh.ops.extrude_face_region(bmr, geom=fs)
+        bmesh.ops.translate(bmr, verts=[e for e in ext["geom"] if isinstance(e, bmesh.types.BMVert)], vec=(0, y1 - y0, 0))
+        bmesh.ops.recalc_face_normals(bmr, faces=bmr.faces[:])
+        o = finish(oname, bmr, m, coll); o.parent = hinge
+        bv = o.modifiers.new("Round", 'BEVEL'); bv.width = bev; bv.segments = 2; bv.limit_method = 'ANGLE'
+        return o
+    def offset(pts, dist):
+        """닫힌 윤곽선을 일정한 두께로 바깥(+)/안(-)으로 넓힘 (모서리도 같은 두께)"""
+        n = len(pts); res = []
+        for i in range(n):
+            p0, p1, p2 = Vector((*pts[i - 1], 0)), Vector((*pts[i], 0)), Vector((*pts[(i + 1) % n], 0))
+            e1, e2 = (p1 - p0).normalized(), (p2 - p1).normalized()
+            n1, n2 = Vector((e1.y, -e1.x, 0)), Vector((e2.y, -e2.x, 0))
+            mt = (n1 + n2).normalized()
+            k = dist / max(mt.dot(n1), 0.3)
+            res.append((p1.x + mt.x * k, p1.y + mt.y * k))
+        return res
+    # 등판 테두리: 같은 두께로 메쉬 가장자리를 앞뒤로 감쌈 (아래쪽은 하얀 연결판과 이어짐)
+    ring(name + "_Back_Rim_White", offset(up, 0.012), offset(up, -0.007), -0.005, 0.022, mw, bev=0.003)
+    # 허리 받침과 등판 사이 빈 곳을 하얀 판으로 채움
+    panel(name + "_Back_Gap_Fill", outline([(0.0, 0.205), (1.0, 0.219)], 0.16, 0.236), -0.005, 0.022, mw, hinge, bev=0.003)
+    # 뒤쪽 곧은 지지대 + 헤드레스트 기둥 (등받이 축에 붙음)
+    def hbox(oname, x0, x1, y0, y1, z0, z1, m):
+        bmx = bmesh.new()
+        bmesh.ops.create_cube(bmx, size=1.0, matrix=Matrix.Translation(((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2)) @ Matrix.Diagonal((x1 - x0, y1 - y0, z1 - z0, 1)))
+        o = finish(oname, bmx, m, coll); o.parent = hinge
+        o.modifiers.new("Round", 'BEVEL').width = 0.006
+        return o
+    # 뒤쪽 지지대: 의자 몸통에서 올라와 등판 테두리 아랫부분을 넓게 받쳐 줌 (Y자 모양, 등판 가운데는 비움)
+    panel(name + "_Back_Support", [(0.036, -0.1), (0.03, 0.12), (0.1, 0.235), (-0.1, 0.235), (-0.03, 0.12), (-0.036, -0.1)], 0.008, 0.032, mw, hinge, bev=0.008)
+    # 헤드레스트 기둥: 등판 테두리 윗부분에서 바로 올라감 (하얀색)
+    for sd in (-1, 1):
+        hbox(name + "_Head_Post_%d" % (sd + 1), sd * 0.06 - 0.009, sd * 0.06 + 0.009, 0.022, 0.036, 0.6, 0.79, mw)
+    conn = box(name + "_Back_Connector", cx - 0.035, cx + 0.035, cy + 0.08, cy + 0.22, 0.37, 0.42, mw, coll)   # 의자 몸통과 지지대 연결
+    conn.modifiers.new("Round", 'BEVEL').width = 0.008
+    # 3D 팔걸이
+    for sd in (-1, 1):
+        x = cx + sd * 0.29
+        tube(name + "_Arm_Post_%d" % (sd + 1), [(cx + sd * 0.14, cy + 0.03, 0.42), (x, cy + 0.03, 0.44), (x, cy + 0.02, 0.56), (x, cy + 0.0, 0.66)], 0.02, mw)
+        pad = box(name + "_Arm_Pad_%d" % (sd + 1), x - 0.04, x + 0.04, cy - 0.14, cy + 0.11, 0.66, 0.685, mg, coll)
+        pv = pad.modifiers.new("Round", 'BEVEL'); pv.width = 0.012; pv.segments = 3
+mesh_chair("Chair_1_Mesh", 2.4, 0.72)   # 스탠드 책상: 인체공학 메쉬 의자
+gaming_chair("Chair_2_Gaming", 3.8, 0.7)   # 컴퓨터 책상: 게이밍 의자
 
 # =============== 조명 & 카메라 & 렌더 ===============
 sd = bpy.data.lights.new("Sun_Window", 'SUN'); sd.energy = 3.0; sd.angle = math.radians(8); sd.color = (1.0, 0.93, 0.82)
